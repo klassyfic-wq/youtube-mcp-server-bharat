@@ -2,7 +2,6 @@ import { env } from "cloudflare:workers";
 import OAuthProvider from "@cloudflare/workers-oauth-provider";
 import { McpServer } from "@modelcontextprotocol/server";
 import { createMcpHandler, getMcpAuthContext } from "agents/mcp/server";
-import { z } from "zod";
 import { GoogleHandler } from "./google-handler";
 import type { Props } from "./utils";
 import { getValidGoogleAccessToken } from "./utils";
