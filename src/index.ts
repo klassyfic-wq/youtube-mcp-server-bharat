@@ -1,17 +1,13 @@
 import { env } from "cloudflare:workers";
 import OAuthProvider from "@cloudflare/workers-oauth-provider";
 import { McpServer } from "@modelcontextprotocol/server";
-import { createMcpHandler } from "agents/mcp/server";
+import { createMcpHandler, getMcpAuthContext } from "agents/mcp/server";
 import { z } from "zod";
 import { GoogleHandler } from "./google-handler";
+import type { Props } from "./utils";
 
 // Context from the auth process, encrypted and stored in the auth token.
 // Read it inside the server with `getMcpAuthContext()?.props`.
-export type Props = {
-	name: string;
-	email: string;
-	accessToken: string;
-};
 
 function createServer() {
 	const server = new McpServer({
