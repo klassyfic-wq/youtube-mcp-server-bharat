@@ -1,7 +1,15 @@
 
+import { env } from "cloudflare:workers";
+import OAuthProvider from "@cloudflare/workers-oauth-provider";
 import { McpServer } from "@modelcontextprotocol/server";
 import { createMcpHandler } from "agents/mcp/server";
-import { z } from "zod";
+import { GoogleHandler } from "./google-handler";
+
+export type Props = {
+  name: string;
+  email: string;
+  accessToken: string;
+};
 
 function createServer() {
   const server = new McpServer({
@@ -9,29 +17,23 @@ function createServer() {
     version: "1.0.0"
   });
 
-  server.registerTool(
-    "youtube_server_status",
-    {
-      description: "Check YouTube MCP server status",
-      inputSchema: {}
-    },
-    async () => ({
-      content: [
-        {
-          type: "text",
-          text: "YouTube MCP Server Bharat is running!"
-        }
-      ]
-    })
-  );
-
   return server;
 }
 
-const handler = createMcpHandler(createServer);
+const mcpHandler = createMcpHandler(createServer);
 
-export default {
-  fetch(request, env, ctx) {
-    return handler(request, env, ctx);
+export default new OAuthProvider<Env>({
+  apiHandler: {
+    fetch(request: Request, env: Env, ctx: ExecutionContext) {
+      return mcpHandler(request, env, ctx);
+    }
+  },
+  apiRoute: "/mcp",
+  authorizeEndpoint: "/authorize",
+  clientRegistrationEndpoint: "/register",
+  defaultHandler: GoogleHandler as any,
+  tokenEndpoint: "/token",
+  resourceMetadata: {
+    resource: env.MCP_RESOURCE
   }
-};
+});
