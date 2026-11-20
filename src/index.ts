@@ -5,22 +5,75 @@ import { createMcpHandler, getMcpAuthContext } from "agents/mcp/server";
 import { z } from "zod";
 import { GoogleHandler } from "./google-handler";
 import type { Props } from "./utils";
+import { getValidGoogleAccessToken } from "./utils";
 
 // Context from the auth process, encrypted and stored in the auth token.
 // Read it inside the server with `getMcpAuthContext()?.props`.
 
 function createServer() {
 	const server = new McpServer({
-		name: "Google OAuth Proxy Demo",
-		version: "0.0.1",
+		name: "YouTube MCP Server Bharat",
+		version: "1.0.0",
 	});
 
+	const authProps = getMcpAuthContext()?.props as Props | undefined;
+
 	server.registerTool(
-		"add",
-		{ inputSchema: z.object({ a: z.number(), b: z.number() }) },
-		async ({ a, b }) => ({
-			content: [{ text: String(a + b), type: "text" }],
-		}),
+		"get_channel_info",
+		{
+			description: "Get information about the authenticated YouTube channel",
+		},
+		async () => {
+			if (!authProps?.userId) {
+				return {
+					content: [{ type: "text", text: "Authentication required." }],
+					isError: true,
+				};
+			}
+
+			try {
+				const accessToken = await getValidGoogleAccessToken(
+					authProps.userId,
+					env,
+				);
+
+				const response = await fetch(
+					"https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics,contentDetails&mine=true",
+					{
+						headers: {
+							Authorization: `Bearer ${accessToken}`,
+						},
+					},
+				);
+
+				if (!response.ok) {
+					throw new Error(`YouTube API returned ${response.status}`);
+				}
+
+				const data = await response.json();
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: JSON.stringify(data, null, 2),
+						},
+					],
+				};
+			} catch (error) {
+				console.error("YouTube channel request failed:", error);
+
+				return {
+					content: [
+						{
+							type: "text",
+							text: "Failed to retrieve YouTube channel information.",
+						},
+					],
+					isError: true,
+				};
+			}
+		},
 	);
 
 	return server;
