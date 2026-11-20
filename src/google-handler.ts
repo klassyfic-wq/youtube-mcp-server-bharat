@@ -230,10 +230,11 @@ app.get("/callback", async (c) => {
 	}
 
 	const props: Props = {
-		accessToken,
-		email: user.email,
-		name: user.name,
-	};
+	accessToken,
+	email: user.email,
+	name: user.name,
+	userId: user.id,
+};
 
 	const { redirectTo } = await c.env.OAUTH_PROVIDER.completeAuthorization({
 		metadata: {
