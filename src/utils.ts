@@ -268,9 +268,9 @@ export async function getValidGoogleAccessToken(
 
 	return tokenResponse.access_token;
 }
-
 export type Props = {
 	name: string;
 	email: string;
 	accessToken: string;
+	userId: string;
 };
