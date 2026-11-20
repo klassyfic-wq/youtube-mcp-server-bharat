@@ -232,6 +232,43 @@ function base64ToBytes(value: string): Uint8Array {
 
 	return bytes;
 }
+
+/**
+ * Gets a valid Google access token.
+ * Refreshes the token when the current access token is expired.
+ */
+export async function getValidGoogleAccessToken(
+	userId: string,
+	env: Env,
+): Promise<string> {
+	const tokenKey = `google:refresh:${userId}`;
+
+	const encryptedRefreshToken = await env.OAUTH_KV.get(tokenKey);
+
+	if (!encryptedRefreshToken) {
+		throw new Error("Google refresh token not found. Reauthorization required.");
+	}
+
+	const refreshToken = await decryptToken(
+		encryptedRefreshToken,
+		env.TOKEN_ENCRYPTION_KEY,
+	);
+
+	const [tokenResponse, errorResponse] = await fetchUpstreamAuthToken({
+		clientId: env.GOOGLE_CLIENT_ID,
+		clientSecret: env.GOOGLE_CLIENT_SECRET,
+		refreshToken,
+		grantType: "refresh_token",
+		upstreamUrl: "https://oauth2.googleapis.com/token",
+	});
+
+	if (errorResponse || !tokenResponse?.access_token) {
+		throw new Error("Google access token refresh failed. Reauthorization may be required.");
+	}
+
+	return tokenResponse.access_token;
+}
+
 export type Props = {
 	name: string;
 	email: string;
