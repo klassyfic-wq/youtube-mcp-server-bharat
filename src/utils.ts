@@ -232,3 +232,8 @@ function base64ToBytes(value: string): Uint8Array {
 
 	return bytes;
 }
+export type Props = {
+	name: string;
+	email: string;
+	accessToken: string;
+};
