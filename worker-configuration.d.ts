@@ -11,6 +11,7 @@ interface Env {
   OAUTH_KV: KVNamespace;
   GOOGLE_CLIENT_ID: string;
   GOOGLE_CLIENT_SECRET: string;
+  TOKEN_ENCRYPTION_KEY: string; // Add this
   COOKIE_ENCRYPTION_KEY: string;
   HOSTED_DOMAIN: string;
 }
