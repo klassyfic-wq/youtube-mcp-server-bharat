@@ -1,31 +1,37 @@
 
-import { McpAgent } from "agents/mcp";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer } from "@modelcontextprotocol/server";
+import { createMcpHandler } from "agents/mcp/server";
+import { z } from "zod";
 
-export class YouTubeMCP extends McpAgent {
-  server = new McpServer({
+function createServer() {
+  const server = new McpServer({
     name: "youtube-mcp-server-bharat",
     version: "1.0.0"
   });
 
-  async init() {
-    this.server.tool(
-      "youtube_server_status",
-      "Check YouTube MCP server status",
-      {},
-      async () => ({
-        content: [
-          {
-            type: "text",
-            text: "YouTube MCP Server Bharat is running!"
-          }
-        ]
-      })
-    );
-  }
+  server.registerTool(
+    "youtube_server_status",
+    {
+      description: "Check YouTube MCP server status",
+      inputSchema: {}
+    },
+    async () => ({
+      content: [
+        {
+          type: "text",
+          text: "YouTube MCP Server Bharat is running!"
+        }
+      ]
+    })
+  );
+
+  return server;
 }
 
-export default {
-  fetch: YouTubeMCP.serve("/sse")
-};
+const handler = createMcpHandler(createServer);
 
+export default {
+  fetch(request, env, ctx) {
+    return handler(request, env, ctx);
+  }
+};
