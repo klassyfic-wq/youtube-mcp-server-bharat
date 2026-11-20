@@ -8,9 +8,9 @@
     "deploy": "wrangler deploy"
   },
   "dependencies": {
-    "@cloudflare/workers-oauth-provider": "latest",
-    "@modelcontextprotocol/server": "latest",
-    "agents": "latest"
+    "agents": "latest",
+    "@modelcontextprotocol/server": "2.4.0",
+    "zod": "latest"
   },
   "devDependencies": {
     "wrangler": "latest"
