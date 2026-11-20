@@ -7,13 +7,19 @@
   "compatibility_flags": [
     "nodejs_compat"
   ],
-"kv_namespaces": [
-  {
-    "binding": "OAUTH_KV",
-    "id": "aa670610e553499a8c19f832f1dc488d"
-  }
-],
+  "vars": {
+    "MCP_RESOURCE": "http://localhost:8788/mcp"
+  },
+  "kv_namespaces": [
+    {
+      "binding": "OAUTH_KV",
+      "id": "aa670610e553499a8c19f832f1dc488d"
+    }
+  ],
   "observability": {
     "enabled": true
+  },
+  "dev": {
+    "port": 8788
   }
 }
