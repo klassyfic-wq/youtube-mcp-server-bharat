@@ -192,8 +192,8 @@ export function registerYoutubeManagementTools(
     {
       description: "Get channel analytics for a date range, including views, watch time, average view duration, and subscriber gains/losses.",
       inputSchema: {
-        startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe("Start date in YYYY-MM-DD format"),
-        endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe("End date in YYYY-MM-DD format"),
+        startDate: z.string().refine(isValidCalendarDate, "startDate must be a real calendar date in YYYY-MM-DD format."),
+        endDate: z.string().refine(isValidCalendarDate, "endDate must be a real calendar date in YYYY-MM-DD format."),
       },
     },
     async ({ startDate, endDate }) => {
