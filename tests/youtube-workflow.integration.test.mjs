@@ -141,3 +141,57 @@ test("video production workflow enforces review before publish approval", async 
   assert.ok(approved.publishApprovedAt);
   assert.match(approved.note, /does not change YouTube visibility/);
 });
+
+
+test("resumable upload reconciles a transient 503 and retries from confirmed offset", async () => {
+  const originalFetch = globalThis.fetch;
+  const kv = fakeKv();
+  const secret = "retry-test-encryption-secret";
+  kv.values.set("google:refresh:retry-user", await encryptToken("refresh-token", secret));
+  const env = {
+    OAUTH_KV: kv,
+    TOKEN_ENCRYPTION_KEY: secret,
+    GOOGLE_CLIENT_ID: "test-client",
+    GOOGLE_CLIENT_SECRET: "test-secret",
+  };
+  let chunkAttempts = 0;
+  let statusChecks = 0;
+  globalThis.fetch = async (input, init = {}) => {
+    const url = String(input);
+    if (url === "https://oauth2.googleapis.com/token") return Response.json({ access_token: "test-access-token" });
+    if (url.includes("uploadType=resumable")) {
+      return new Response(null, { status: 200, headers: { Location: "https://www.googleapis.com/upload/youtube/v3/videos?upload_id=retry-session" } });
+    }
+    if (url.includes("upload_id=retry-session") && init.method === "PUT" && new Headers(init.headers).get("Content-Range") === "bytes */3") {
+      statusChecks++;
+      return new Response(null, { status: 308 });
+    }
+    if (url.includes("upload_id=retry-session") && init.method === "PUT") {
+      chunkAttempts++;
+      if (chunkAttempts === 1) return new Response(null, { status: 503, headers: { "Retry-After": "0" } });
+      return Response.json({ id: "abcdefghijk", snippet: { title: "Retry test" }, status: { privacyStatus: "private" } }, { status: 201 });
+    }
+    throw new Error("Unexpected mocked request: " + url);
+  };
+
+  try {
+    const server = fakeServer();
+    registerYoutubeUploadTools(server, { userId: "retry-user", name: "Test", email: "test@example.com", accessToken: "" }, env);
+    const started = parseToolResult(await server.handlers.get("start_video_upload")({
+      title: "Retry test",
+      privacyStatus: "private",
+      contentType: "video/mp4",
+      totalBytes: 3,
+    }));
+    const completed = parseToolResult(await server.handlers.get("upload_video_chunk")({
+      uploadId: started.uploadId,
+      offset: 0,
+      chunkBase64: Buffer.from([3, 4, 5]).toString("base64"),
+    }));
+    assert.equal(completed.complete, true);
+    assert.equal(chunkAttempts, 2);
+    assert.equal(statusChecks, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
