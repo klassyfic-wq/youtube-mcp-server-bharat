@@ -19,15 +19,16 @@ The runtime requires persistent storage mounted at `/data`. It is not deployed b
 All endpoints require `Authorization: Bearer <RENDERER_SHARED_SECRET>`.
 
 - `GET /health`
-- `POST /render` with `{ "jobId": "...", "manifest": { ... } }`
-- `GET /preview/:jobId` returns the MP4.
-- `POST /preview/:jobId` accepts `{ "edits": { "subtitleSrt": "..." } }` and re-renders from the original manifest.
+- `POST /render` with `{ "jobId": "...", "manifest": { ... } }` returns HTTP 202 immediately.
+- `GET /jobs/:jobId` polls queued/rendering/preview_ready/failed status.
+- `GET /preview/:jobId` returns the MP4 once ready.
+- `POST /preview/:jobId` accepts `{ "edits": { "subtitleSrt": "..." } }` and queues a revision from the original manifest.
 
-Each manifest scene must include sequential `startSeconds`/`durationSeconds`, `imageUrl`, and `audioUrl`. The URLs must be HTTPS and their hostname must be explicitly listed in `ASSET_HOST_ALLOWLIST`; redirects are rejected. Audio is padded/trimmed to the scene's declared duration, scene clips are concatenated, and SRT subtitles are burned into the preview.
+Each manifest scene must include sequential `startSeconds`/`durationSeconds`, `imageUrl`, and `audioUrl`. The URLs must be HTTPS and their hostname must be explicitly listed in `ASSET_HOST_ALLOWLIST`; redirects are rejected. FFprobe measures each generated voiceover. Each scene lasts at least its planned duration and is extended if speech is longer; audio is padded to that scene duration, visuals remain on screen for the same interval, and captions are re-timed proportionally to narration word count. Scene clips are concatenated and SRT subtitles are burned into the preview. This is scene-level synchronization, not phoneme-level forced alignment.
 
 ## Important limits
 
 - This is a first external renderer adapter, not a managed/free hosting deployment.
 - The in-memory job index is lost on restart; the MP4 itself is persisted under `/data/:jobId/preview.mp4`. Production needs durable job metadata and object storage.
 - Scene transitions currently render as hard cuts; transition-specific xfade support remains future work.
-- Only subtitle SRT edits are accepted in this initial preview revision. Do not expose the renderer publicly without TLS, rate limiting, a strong secret, and a persistent volume.
+- Only subtitle SRT edits are accepted in this initial preview revision. Scene transitions currently render as hard cuts. Do not expose the renderer publicly without TLS, rate limiting, a strong secret, and a persistent volume.
