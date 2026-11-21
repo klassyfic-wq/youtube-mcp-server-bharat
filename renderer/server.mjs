@@ -39,6 +39,33 @@ async function dispatchCloudRunJob(jobId) {
   if (!response.ok) throw new Error(`Cloud Run Job dispatch failed: HTTP ${response.status}`);
   return data.name || null;
 }
+async function reconcileCloudRunExecution(jobId, record) {
+  if (!CLOUD_RUN_JOBS_MODE || !record.executionName || !["queued", "rendering"].includes(record.status)) return record;
+  const token = await googleAccessToken();
+  const endpoint = `https://run.googleapis.com/v2/${record.executionName.split("/").map(encodeURIComponent).join("/")}`;
+  const response = await fetch(endpoint, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(5000) });
+  if (!response.ok) throw new Error(`Cloud Run execution lookup failed: HTTP ${response.status}`);
+  const execution = await response.json();
+  const conditions = Array.isArray(execution.conditions) ? execution.conditions : [];
+  const terminalFailure = conditions.find(condition =>
+    condition.state === "CONDITION_STATE_FALSE" &&
+    ["Completed", "ResourcesAvailable"].includes(condition.type)
+  );
+  const completed = Boolean(execution.completionTime);
+  if (!completed && !terminalFailure) return record;
+  const succeeded = conditions.some(condition => condition.type === "Completed" && condition.state === "CONDITION_STATE_TRUE");
+  const next = {
+    ...record,
+    status: succeeded ? "failed" : "failed",
+    error: succeeded
+      ? "Cloud Run execution completed but the renderer did not persist a preview result."
+      : "Cloud Run execution ended before the renderer persisted a preview result.",
+    executionState: execution.state || null,
+    updatedAt: new Date().toISOString()
+  };
+  await persistJob(jobId, next);
+  return next;
+}
 async function queueRender(jobId, manifest, edits = {}, revision = 0) {
   const record = { status: CLOUD_RUN_JOBS_MODE ? "queued" : "rendering", manifest, edits, revision, updatedAt: new Date().toISOString() };
   await persistJob(jobId, record);
@@ -221,8 +248,12 @@ const app = http.createServer(async (req,res) => {
     }
     const statusMatch = url.pathname.match(new RegExp("^/jobs/([0-9a-f-]{36})$", "i"));
     if (req.method === "GET" && statusMatch) {
-      const record = await loadJob(statusMatch[1]);
+      let record = await loadJob(statusMatch[1]);
       if (!record) return send(res,404,{error:"Render job not found"});
+      if (CLOUD_RUN_JOBS_MODE && record.executionName) {
+        try { record = await reconcileCloudRunExecution(statusMatch[1], record); }
+        catch (error) { process.stderr.write(`execution reconciliation failed for ${statusMatch[1]}: ${error instanceof Error ? error.message : "unknown error"}\\n`); }
+      }
       const { manifest: _manifest, previewPath: _path, ...publicRecord } = record;
       return send(res,200,publicRecord);
     }
