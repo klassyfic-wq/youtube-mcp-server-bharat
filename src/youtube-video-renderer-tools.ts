@@ -75,15 +75,38 @@ export function registerVideoRendererTools(server:McpServer,authProps:Props|unde
         tracks.push({...track,audioUrl:new URL(`/media/audio/${at}`,base).toString(),imageUrl:new URL(`/media/image/${it}`,base).toString()});
       }
       const endpoint=rendererBase(env);const renderManifest={...manifest,voiceoverTracks:tracks};
-      const upstream=await fetch(new URL("/render",endpoint),{method:"POST",headers:{Authorization:`Bearer ${env.RENDERER_API_KEY}`,"Content-Type":"application/json"},body:JSON.stringify({jobId,manifest:renderManifest}),signal:AbortSignal.timeout(15*60*1000)});
-      if(!upstream.ok)throw new Error(`External renderer returned HTTP ${upstream.status}.`);
+      const upstream=await fetch(new URL("/render",endpoint),{method:"POST",headers:{Authorization:`Bearer ${env.RENDERER_API_KEY}`,"Content-Type":"application/json"},body:JSON.stringify({jobId,manifest:renderManifest}),signal:AbortSignal.timeout(30_000)});
+      if(upstream.status!==202)throw new Error(`External renderer returned HTTP ${upstream.status}.`);
       const result=await upstream.json() as Record<string,unknown>;
-      job.stage="review";job.artifacts={...job.artifacts,videoPreview:`renderer://${jobId}`};job.updatedAt=new Date().toISOString();
+      job.stage="render";job.artifacts={...job.artifacts,videoPreview:`renderer://${jobId}`};job.updatedAt=new Date().toISOString();
       await env.OAUTH_KV.put(jobKey(userId,jobId),JSON.stringify(job),{expirationTtl:30*24*60*60});
-      return response({jobId,status:"preview_ready",rendererResult:result,note:"Preview is ready for review. YouTube upload and publishing have not been performed."});
+      return response({jobId,status:"queued",rendererResult:result,note:"Rendering runs asynchronously. Call get_video_render_status until status is preview_ready; YouTube upload and publishing have not been performed."});
     }catch(e){return failure(e);}
   });
-  server.registerTool("create_video_preview_link",{
+
+  server.registerTool("get_video_render_status",{
+    description:"Poll the external FFmpeg renderer for a job's queued/rendering/preview_ready/failed status. Moves the job to review only after the renderer confirms a ready preview.",
+    inputSchema:{jobId:z.string().uuid()},
+  },async({jobId})=>{
+    try{
+      const userId=authProps?.userId;if(!userId)throw new Error("Authentication required.");
+      const raw=await env.OAUTH_KV.get(jobKey(userId,jobId));if(!raw)throw new Error("Video job not found or expired.");
+      const job=JSON.parse(raw) as Job;if(job.userId!==userId)throw new Error("Video job does not belong to this account.");
+      if(job.stage!=="render"&&job.stage!=="review")throw new Error("Video job is not in the render/review stage.");
+      const base=rendererBase(env);
+      const upstream=await fetch(new URL(`/jobs/${jobId}`,base),{headers:{Authorization:`Bearer ${env.RENDERER_API_KEY}`},signal:AbortSignal.timeout(30_000)});
+      if(!upstream.ok)throw new Error(`Renderer status API returned HTTP ${upstream.status}.`);
+      const status=await upstream.json() as {status?:string;error?:string;previewPath?:string;byteLength?:number;durationSeconds?:number;sceneCount?:number;revision?:number};
+      if(status.status==="preview_ready"){
+        job.stage="review";job.updatedAt=new Date().toISOString();
+        job.artifacts={...job.artifacts,videoPreview:`renderer://${jobId}`};
+        await env.OAUTH_KV.put(jobKey(userId,jobId),JSON.stringify(job),{expirationTtl:30*24*60*60});
+      }
+      if(status.status==="failed")throw new Error(status.error??"External FFmpeg render failed.");
+      return response({jobId,status:status.status??"unknown",stage:job.stage,byteLength:status.byteLength,durationSeconds:status.durationSeconds,sceneCount:status.sceneCount,revision:status.revision,note:status.status==="preview_ready"?"Preview is ready for review. Call create_video_preview_link to watch it.": "Rendering is still in progress."});
+    }catch(e){return failure(e);}
+  });
+\n  server.registerTool("create_video_preview_link",{
     description:"Issue a short-lived private preview URL for the rendered MP4. Treat the URL as a bearer secret.",
     inputSchema:{jobId:z.string().uuid()},
   },async({jobId})=>{
