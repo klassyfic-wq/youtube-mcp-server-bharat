@@ -79,3 +79,24 @@ test("edit requests derive their manifest and revision from the latest persisted
   assert.match(source, /if \(isEdit\)[\s\S]*?manifest = existing\.manifest;[\s\S]*?revision = \(existing\.revision \|\| 0\) \+ 1/);
   assert.match(source, /queueRender\(match\[1\], record\.manifest, payload\.edits \|\| \{\}, 0, true\)/);
 });
+
+test("ambiguous Cloud Run dispatch does not overwrite worker progress or trigger unsafe retry", async () => {
+  const source = await readFile("renderer/server.mjs", "utf8");
+  assert.match(source, /dispatch_unknown/);
+  assert.match(source, /dispatchOutcomeUnknown: true/);
+  assert.match(source, /Never overwrite worker progress or automatically retry an ambiguous dispatch/);
+  assert.match(source, /\["rendering", "preview_ready", "failed"\]\.includes\(latest\.status\)/);
+});
+
+test("missing persisted job does not fall back to a stale process cache", async () => {
+  const source = await readFile("renderer/server.mjs", "utf8");
+  const loadBlock = source.slice(source.indexOf("async function loadJob"), source.indexOf("\\nfunction send"));
+  assert.match(loadBlock, /if \(error\?\.code === "ENOENT"\) return null/);
+  assert.doesNotMatch(loadBlock, /jobs\.get\(jobId\) \|\| null/);
+});
+
+test("completed Cloud Run render is not repeated by a retried worker", async () => {
+  const source = await readFile("renderer/server.mjs", "utf8");
+  assert.match(source, /record\.status === "preview_ready" && record\.previewPath/);
+  assert.match(source, /A retried execution must not render a completed job again/);
+});
