@@ -59,6 +59,74 @@ function splitCaption(text: string, maxWords = 8) {
 }
 
 export function registerVideoMediaManifestTools(server: McpServer, authProps: Props | undefined, env: MediaEnv) {
+
+  server.registerTool(
+    "save_approved_video_plan",
+    {
+      description: "Validate and persist a manually approved structured script and scene plan into the dedicated KV records consumed by prepare_video_media_manifest. This does not call AI/media providers or render anything.",
+      inputSchema: {
+        jobId: z.string().uuid(),
+        script: ScriptSchema,
+        scenePlan: ScenePlanSchema,
+      },
+    },
+    async ({ jobId, script: inputScript, scenePlan: inputScenePlan }) => {
+      try {
+        const userId = authProps?.userId;
+        if (!userId) throw new Error("Authentication required.");
+        const key = jobKey(userId, jobId);
+        const rawJob = await env.OAUTH_KV.get(key);
+        if (!rawJob) throw new Error("Video job not found or expired.");
+        const job = JSON.parse(rawJob) as StoredJob;
+        if (job.userId !== userId) throw new Error("Video job does not belong to this account.");
+        if (job.stage !== "script") throw new Error("Approved plans can only be saved while the job is at script stage.");
+
+        const script = ScriptSchema.parse(inputScript);
+        const scenePlan = ScenePlanSchema.parse(inputScenePlan);
+        const summedDuration = scenePlan.scenes.reduce((sum, scene) => sum + scene.durationSeconds, 0);
+        if (Math.abs(summedDuration - scenePlan.totalDurationSeconds) > 1) {
+          throw new Error("Scene durations must match scenePlan.totalDurationSeconds.");
+        }
+        const targetSeconds = Math.round(job.brief.durationMinutes * 60);
+        if (Math.abs(summedDuration - targetSeconds) > targetSeconds * 0.1) {
+          throw new Error(`Scene plan duration (${summedDuration}s) is outside the allowed 10% range for the ${targetSeconds}s target.`);
+        }
+        if (scenePlan.scenes.some((scene, index) => scene.sceneNumber !== index + 1)) {
+          throw new Error("Scene numbers must be sequential starting at 1.");
+        }
+
+        const storedScriptKey = scriptKey(userId, jobId);
+        const storedScenesKey = scenesKey(userId, jobId);
+        await env.OAUTH_KV.put(storedScriptKey, JSON.stringify(script), { expirationTtl: TTL_SECONDS });
+        await env.OAUTH_KV.put(storedScenesKey, JSON.stringify(scenePlan), { expirationTtl: TTL_SECONDS });
+
+        job.artifacts = {
+          ...job.artifacts,
+          script: `kv://${storedScriptKey}`,
+          scenePlan: `kv://${storedScenesKey}`,
+        };
+        job.updatedAt = new Date().toISOString();
+        await env.OAUTH_KV.put(key, JSON.stringify(job), { expirationTtl: TTL_SECONDS });
+
+        return response({
+          jobId,
+          stage: job.stage,
+          status: "approved_plan_saved",
+          artifacts: {
+            script: `kv://${storedScriptKey}`,
+            scenePlan: `kv://${storedScenesKey}`,
+          },
+          sceneCount: scenePlan.scenes.length,
+          totalDurationSeconds: summedDuration,
+          nextAction: "Call prepare_video_media_manifest with this jobId. No AI or media provider is needed for that step.",
+          note: "Structured approved plan saved to the exact KV keys consumed by the manifest tool. No provider calls or media generation occurred.",
+        });
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+
   server.registerTool(
     "prepare_video_media_manifest",
     {
