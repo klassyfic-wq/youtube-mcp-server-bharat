@@ -54,3 +54,10 @@ test("Cloud Run reconciliation uses v2 Completed condition terminal states", asy
   assert.match(source, /CONDITION_FAILED/);
   assert.match(source, /condition\.type === "Completed"/);
 });
+
+test("job reads refresh from shared storage instead of trusting a process cache", async () => {
+  const source = await readFile("renderer/server.mjs", "utf8");
+  const loadBlock = source.slice(source.indexOf("async function loadJob"), source.indexOf("\nfunction send"));
+  assert.doesNotMatch(loadBlock, /if \(jobs\.has\(jobId\)\) return jobs\.get\(jobId\)/);
+  assert.match(loadBlock, /readFile\(path\.join\(JOBS_DIR/);
+});
