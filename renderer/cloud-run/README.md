@@ -41,3 +41,8 @@ If dispatch fails, the durable record is marked `failed` and the API returns an 
 ## Safety and cost
 
 No GCP resources are created by this code. Before deployment, confirm the exact region, bucket, service and Job settings, IAM bindings, quotas, and estimated cost. Budget alerts are notifications, not spending caps. Use Secret Manager, keep the dispatcher authenticated/private, and set maximum service instances and Job execution limits.
+
+
+### Concurrency / idempotency boundary
+
+The renderer serializes submissions, edits, and worker execution with an in-process per-job mutex and rejects duplicate initial submissions or edits while a job is active. This protects a single renderer process only. It is **not a distributed lock**: separate Cloud Run dispatcher instances or retried Job executions can still race on the shared volume. Before enabling multi-instance production traffic, add a storage-backed lease/compare-and-swap guard (or another coordinator with atomic conditional writes) and test it against the actual Cloud Storage FUSE mount. Do not treat the current mutex as cross-instance protection.
