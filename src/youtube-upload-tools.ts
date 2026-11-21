@@ -57,11 +57,15 @@ function decodeChunk(encoded: string): Uint8Array {
   return bytes;
 }
 
-function nextOffsetFromRange(range: string | null): number {
+function nextOffsetFromRange(range: string | null, totalBytes: number): number {
   if (!range) return 0;
   const match = /^bytes=0-(\d+)$/.exec(range);
   if (!match) throw new Error("YouTube returned an invalid resumable upload range.");
-  return Number(match[1]) + 1;
+  const offset = Number(match[1]) + 1;
+  if (!Number.isSafeInteger(offset) || offset > totalBytes) {
+    throw new Error("YouTube returned an upload offset outside the declared file size.");
+  }
+  return offset;
 }
 
 async function loadSession(env: UploadEnv, userId: string, uploadId: string): Promise<UploadSession> {
@@ -192,7 +196,7 @@ export function registerYoutubeUploadTools(
         });
 
         if (response.status === 308) {
-          const nextOffset = nextOffsetFromRange(response.headers.get("Range"));
+          const nextOffset = nextOffsetFromRange(response.headers.get("Range"), session.totalBytes);
           session.nextOffset = nextOffset;
           await env.OAUTH_KV.put(sessionKey(userId!, uploadId), JSON.stringify(session), {
             expirationTtl: SESSION_TTL_SECONDS,
@@ -265,7 +269,7 @@ export function registerYoutubeUploadTools(
           },
         });
         if (response.status === 308) {
-          const nextOffset = nextOffsetFromRange(response.headers.get("Range"));
+          const nextOffset = nextOffsetFromRange(response.headers.get("Range"), session.totalBytes);
           session.nextOffset = nextOffset;
           await env.OAUTH_KV.put(sessionKey(userId!, uploadId), JSON.stringify(session), {
             expirationTtl: SESSION_TTL_SECONDS,
