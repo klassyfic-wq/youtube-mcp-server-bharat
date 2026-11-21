@@ -53,14 +53,14 @@ export async function handleAudioArtifactRequest(request: Request, env: Delivery
     const artifactRaw = await env.OAUTH_KV.get(grant.audioKey);
     if (!artifactRaw) return errorResponse(404, "Audio artifact not found or expired.");
     const artifact = JSON.parse(artifactRaw) as AudioArtifact;
-    const allowedTypes: Record<string, string> = {
-      mp3: "audio/mpeg",
-      wav: "audio/wav",
-      opus: "audio/ogg",
+    const allowedTypes: Record<string, string[]> = {
+      mp3: ["audio/mpeg", "audio/mp3"],
+      wav: ["audio/wav", "audio/x-wav"],
+      opus: ["audio/ogg", "audio/opus"],
     };
     if (artifact.schemaVersion !== 1 || artifact.jobId !== grant.jobId ||
         artifact.sceneNumber !== grant.sceneNumber || !allowedTypes[artifact.format] ||
-        artifact.contentType !== allowedTypes[artifact.format] && !(artifact.format === "mp3" && artifact.contentType === "audio/mp3") ||
+        !allowedTypes[artifact.format].includes(artifact.contentType) ||
         typeof artifact.audioBase64 !== "string") {
       return errorResponse(500, "Stored audio artifact failed validation.");
     }
@@ -71,7 +71,7 @@ export async function handleAudioArtifactRequest(request: Request, env: Delivery
     return new Response(bytes, {
       status: 200,
       headers: {
-        "Content-Type": allowedTypes[artifact.format],
+        "Content-Type": artifact.contentType,
         "Content-Length": String(bytes.byteLength),
         "Content-Disposition": `attachment; filename="scene-${grant.sceneNumber}.${artifact.format}"`,
         "Cache-Control": "private, no-store, max-age=0",
