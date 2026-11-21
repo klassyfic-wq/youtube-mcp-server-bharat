@@ -41,7 +41,7 @@ function failure(error: unknown) {
   };
 }
 
-function decodeChunk(encoded: string): Uint8Array {
+export function decodeChunk(encoded: string): Uint8Array {
   if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded)) {
     throw new Error("chunkBase64 must be valid standard Base64.");
   }
@@ -57,7 +57,7 @@ function decodeChunk(encoded: string): Uint8Array {
   return bytes;
 }
 
-function nextOffsetFromRange(range: string | null, totalBytes: number): number {
+export function nextOffsetFromRange(range: string | null, totalBytes: number): number {
   if (!range) return 0;
   const match = /^bytes=0-(\d+)$/.exec(range);
   if (!match) throw new Error("YouTube returned an invalid resumable upload range.");
