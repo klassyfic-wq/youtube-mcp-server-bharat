@@ -17,6 +17,7 @@ type UploadSession = {
   contentType: (typeof MIME_TYPES)[number];
   nextOffset: number;
   createdAt: string;
+  completedVideo?: { id: string; title: string | null; privacyStatus: string | null };
 };
 
 async function getToken(userId: string | undefined, env: UploadEnv) {
@@ -69,7 +70,7 @@ async function loadSession(env: UploadEnv, userId: string, uploadId: string): Pr
   if (!raw) throw new Error("Upload session not found or expired. Start a new upload.");
   const session = JSON.parse(raw) as UploadSession;
   if (session.userId !== userId) throw new Error("Upload session does not belong to this account.");
-  return { ...session, sessionUriEncrypted: session.sessionUriEncrypted };
+  return session;
 }
 
 export function registerYoutubeUploadTools(
@@ -166,6 +167,7 @@ export function registerYoutubeUploadTools(
         const userId = authProps?.userId;
         const token = await getToken(userId, env);
         const session = await loadSession(env, userId!, uploadId);
+        if (session.completedVideo) throw new Error("This upload is already complete.");
         if (offset !== session.nextOffset) {
           throw new Error(`Unexpected chunk offset. YouTube upload expects byte ${session.nextOffset}; resume from that offset.`);
         }
@@ -178,6 +180,16 @@ export function registerYoutubeUploadTools(
           throw new Error("Non-final chunks must be exactly 256 KiB.");
         }
 
+        if (session.completedVideo) {
+          return result({
+            uploadId,
+            complete: true,
+            videoId: session.completedVideo.id,
+            title: session.completedVideo.title,
+            privacyStatus: session.completedVideo.privacyStatus,
+            videoUrl: `https://www.youtube.com/watch?v=${session.completedVideo.id}`,
+          });
+        }
         const response = await fetch(await decryptToken(session.sessionUriEncrypted, env.TOKEN_ENCRYPTION_KEY), {
           method: "PUT",
           headers: {
@@ -206,8 +218,15 @@ export function registerYoutubeUploadTools(
 
         if (response.status === 200 || response.status === 201) {
           const video = await response.json() as { id?: string; status?: { privacyStatus?: string }; snippet?: { title?: string } };
-          await env.OAUTH_KV.delete(sessionKey(userId!, uploadId));
           if (!video.id) throw new Error("YouTube completed the upload but did not return a video ID.");
+          session.completedVideo = {
+            id: video.id,
+            title: video.snippet?.title ?? null,
+            privacyStatus: video.status?.privacyStatus ?? null,
+          };
+          await env.OAUTH_KV.put(sessionKey(userId!, uploadId), JSON.stringify(session), {
+            expirationTtl: SESSION_TTL_SECONDS,
+          });
           return result({
             uploadId,
             complete: true,
@@ -261,7 +280,16 @@ export function registerYoutubeUploadTools(
         }
         if (response.status === 200 || response.status === 201) {
           const video = await response.json() as { id?: string; status?: { privacyStatus?: string }; snippet?: { title?: string } };
-          await env.OAUTH_KV.delete(sessionKey(userId!, uploadId));
+          if (video.id) {
+            session.completedVideo = {
+              id: video.id,
+              title: video.snippet?.title ?? null,
+              privacyStatus: video.status?.privacyStatus ?? null,
+            };
+            await env.OAUTH_KV.put(sessionKey(userId!, uploadId), JSON.stringify(session), {
+              expirationTtl: SESSION_TTL_SECONDS,
+            });
+          }
           return result({
             uploadId,
             complete: true,
