@@ -1,6 +1,6 @@
 import http from "node:http";
 import { spawn } from "node:child_process";
-import { mkdtemp, mkdir, readFile, rm, writeFile, stat } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile, stat, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -10,6 +10,23 @@ const SECRET = process.env.RENDERER_SHARED_SECRET;
 const DATA_DIR = process.env.RENDERER_DATA_DIR || "/data";
 const ALLOWED_HOSTS = new Set((process.env.ASSET_HOST_ALLOWLIST || "").split(",").map(v => v.trim().toLowerCase()).filter(Boolean));
 const jobs = new Map();
+const JOBS_DIR = path.join(DATA_DIR, "jobs");
+async function persistJob(jobId, record) {
+  jobs.set(jobId, record);
+  await writeFile(path.join(JOBS_DIR, `${jobId}.json`), JSON.stringify(record), "utf8");
+  return record;
+}
+async function loadJob(jobId) {
+  if (jobs.has(jobId)) return jobs.get(jobId);
+  try {
+    const record = JSON.parse(await readFile(path.join(JOBS_DIR, `${jobId}.json`), "utf8"));
+    jobs.set(jobId, record);
+    return record;
+  } catch (error) {
+    if (error?.code === "ENOENT") return null;
+    throw error;
+  }
+}
 
 function send(res, status, body, type = "application/json") {
   res.writeHead(status, { "content-type": type, "cache-control": "no-store", "x-content-type-options": "nosniff" });
@@ -145,14 +162,14 @@ const app = http.createServer(async (req,res) => {
     }
     const statusMatch = url.pathname.match(new RegExp("^/jobs/([0-9a-f-]{36})$", "i"));
     if (req.method === "GET" && statusMatch) {
-      const record = jobs.get(statusMatch[1]);
+      const record = await loadJob(statusMatch[1]);
       if (!record) return send(res,404,{error:"Render job not found"});
       const { manifest: _manifest, previewPath: _path, ...publicRecord } = record;
       return send(res,200,publicRecord);
     }
     const match = url.pathname.match(new RegExp("^/preview/([0-9a-f-]{36})$", "i"));
     if (req.method === "GET" && match) {
-      const jobId = match[1]; const record = jobs.get(jobId);
+      const jobId = match[1]; const record = await loadJob(jobId);
       if (!record || record.status !== "preview_ready" || !record.previewPath) return send(res,404,{error:"Preview not found"});
       const bytes = await readFile(record.previewPath);
       res.writeHead(200, { "content-type":"video/mp4", "content-length":bytes.length, "cache-control":"private, no-store", "x-content-type-options":"nosniff", "content-disposition":`inline; filename="${jobId}-preview.mp4"` });
@@ -160,7 +177,7 @@ const app = http.createServer(async (req,res) => {
     }
     if (req.method === "POST" && match) {
       const payload = await body(req);
-      const record = jobs.get(match[1]);
+      const record = await loadJob(match[1]);
       if (!record?.manifest) return send(res,404,{error:"Original render manifest is unavailable"});
       jobs.set(match[1], { ...record, status: "rendering", updatedAt: new Date().toISOString() });
       void render(match[1], record.manifest, payload.edits || {}).then(result => jobs.set(match[1], { ...result, status: "preview_ready", manifest: record.manifest, revision: result.revision, updatedAt: new Date().toISOString() })).catch(error => jobs.set(match[1], { ...record, status: "failed", error: error instanceof Error ? error.message : "Render failed", updatedAt: new Date().toISOString() }));
