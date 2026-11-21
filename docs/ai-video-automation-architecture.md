@@ -137,3 +137,15 @@ Do not add an R2 binding, paid AI provider, or rendering infrastructure just bec
 - Tests cover successful generation and retrieval, missing provider configuration, invalid image bytes, and account isolation.
 
 This adapter is code-complete but not live-provider-validated until image provider credentials are configured. KV is still the current artifact store; a production renderer with durable object storage is a separate infrastructure step.
+
+
+## External FFmpeg renderer integration (feature branch)
+
+- Container service is under `renderer/` with a Node 22 + FFmpeg Dockerfile. It runs separately from Cloudflare Workers and is not deployed automatically.
+- Worker tools: `render_video_preview`, `get_video_render_status`, and `create_video_preview_link`. The render call is asynchronous; status polling advances the job to `review` only when the external service reports `preview_ready`.
+- Worker issues short-lived (10-minute) per-user/per-scene audio and image bearer URLs, then sends the enriched manifest to the renderer. Renderer fetches only HTTPS assets whose host is in `ASSET_HOST_ALLOWLIST`; redirects are rejected.
+- Renderer uses ffprobe to measure voiceover duration. It extends scene timing when narration exceeds the planned duration, pads audio to the final scene duration, keeps the visual on screen for the same interval, and retimes SRT captions proportionally by narration word count. This is scene-level synchronization, not phoneme-level forced alignment.
+- Scene clips are concatenated, subtitles are burned into the MP4, and a private preview is served through a Worker proxy grant. Subtitle-only preview revisions can be queued through the renderer API.
+- Initial renderer uses hard cuts; transition-specific xfade effects remain unimplemented. Renderer job metadata is currently in memory and must be moved to durable storage for production. The MP4 is persisted to the mounted `/data` volume.
+- Required Worker configuration: `MEDIA_BASE_URL`, `RENDERER_API_URL` (HTTPS origin), and secret `RENDERER_API_KEY`. Renderer runtime configuration: `RENDERER_SHARED_SECRET`, `ASSET_HOST_ALLOWLIST`, and persistent `/data` volume.
+- This is code/integration work only. The renderer still needs to be deployed on user-controlled compute, and the image/TTS providers need credentials before real assets can be generated.
