@@ -90,7 +90,7 @@ test("ambiguous Cloud Run dispatch does not overwrite worker progress or trigger
 
 test("missing persisted job does not fall back to a stale process cache", async () => {
   const source = await readFile("renderer/server.mjs", "utf8");
-  const loadBlock = source.slice(source.indexOf("async function loadJob"), source.indexOf("\\nfunction send"));
+  const loadBlock = source.slice(source.indexOf("async function loadJob"), source.indexOf("\nfunction send"));
   assert.match(loadBlock, /if \(error\?\.code === "ENOENT"\) return null/);
   assert.doesNotMatch(loadBlock, /jobs\.get\(jobId\) \|\| null/);
 });
