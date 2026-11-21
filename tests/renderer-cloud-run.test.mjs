@@ -28,3 +28,14 @@ test("Cloud Run Jobs mode dispatches durable jobs and uses a one-shot worker", a
   assert.match(source, /shared persistent volume/);
   assert.match(source, /executionMode: CLOUD_RUN_JOBS_MODE/);
 });
+
+test("Cloud Run dispatcher restart does not fail independent Job executions", async () => {
+  const source = await readFile("renderer/server.mjs", "utf8");
+  assert.match(source, /!CLOUD_RUN_JOBS_MODE && \(record\.status === "queued" \|\| record\.status === "rendering"\)/);
+});
+
+test("dispatch response merges execution metadata without overwriting worker progress", async () => {
+  const source = await readFile("renderer/server.mjs", "utf8");
+  assert.match(source, /const latest = await loadJob\(jobId\) \|\| record/);
+  assert.match(source, /\{ \.\.\.latest, executionName, updatedAt:/);
+});
