@@ -225,4 +225,87 @@ export function registerVideoMediaManifestTools(server: McpServer, authProps: Pr
       }
     },
   );
+
+  server.registerTool(
+    "get_video_media_manifest",
+    {
+      description: "Read the saved media manifest and SRT subtitles for an authenticated user's video job. Includes read-only integrity diagnostics; never regenerates or modifies artifacts.",
+      inputSchema: { jobId: z.string().uuid() },
+    },
+    async ({ jobId }) => {
+      try {
+        const userId = authProps?.userId;
+        if (!userId) throw new Error("Authentication required.");
+        const rawJob = await env.OAUTH_KV.get(jobKey(userId, jobId));
+        if (!rawJob) throw new Error("Video job not found or expired.");
+        const job = JSON.parse(rawJob) as StoredJob;
+        if (job.userId !== userId) throw new Error("Video job does not belong to this account.");
+
+        const expectedManifestRef = `kv://${manifestKey(userId, jobId)}`;
+        if (job.artifacts?.mediaManifest !== expectedManifestRef) throw new Error("The job does not contain a valid media manifest reference.");
+        if (job.artifacts?.subtitles !== `${expectedManifestRef}#subtitles`) throw new Error("The job does not contain a valid subtitles reference.");
+
+        const rawManifest = await env.OAUTH_KV.get(manifestKey(userId, jobId));
+        if (!rawManifest) throw new Error("Saved media manifest not found or expired.");
+        const manifest = JSON.parse(rawManifest) as {
+          jobId?: string; targetDurationSeconds?: number;
+          voiceoverTracks?: Array<{ sceneNumber?: number; startSeconds?: number; durationSeconds?: number; narrationText?: string; visualRequest?: { prompt?: string }; onScreenText?: string }>;
+          subtitles?: { format?: string; content?: string }; providerStatus?: Record<string, string>;
+        };
+        if (manifest.jobId !== jobId) throw new Error("Stored manifest job ID does not match the requested job.");
+        const tracks = Array.isArray(manifest.voiceoverTracks) ? manifest.voiceoverTracks : [];
+        const subtitleText = manifest.subtitles?.content;
+        if (manifest.subtitles?.format !== "srt" || typeof subtitleText !== "string" || !subtitleText.trim()) {
+          throw new Error("SRT subtitles are missing from the saved manifest.");
+        }
+
+        const issues: string[] = [];
+        let expectedStart = 0;
+        for (let index = 0; index < tracks.length; index++) {
+          const track = tracks[index];
+          if (track.sceneNumber !== index + 1) issues.push(`Scene numbering is not sequential at scene ${index + 1}.`);
+          if (typeof track.startSeconds !== "number" || typeof track.durationSeconds !== "number") {
+            issues.push(`Scene ${index + 1} has invalid timing metadata.`); continue;
+          }
+          if (Math.abs(track.startSeconds - expectedStart) > 0.001) issues.push(`Scene ${index + 1} has a gap or overlap.`);
+          expectedStart = track.startSeconds + track.durationSeconds;
+          if (!track.narrationText?.trim()) issues.push(`Scene ${index + 1} has no narration.`);
+          if (!track.visualRequest?.prompt?.trim()) issues.push(`Scene ${index + 1} has no visual prompt.`);
+        }
+        if (!tracks.length) issues.push("Manifest contains no scene tracks.");
+        if (typeof manifest.targetDurationSeconds === "number" && Math.abs(expectedStart - manifest.targetDurationSeconds) > 0.001) issues.push("Scene track duration does not match manifest target duration.");
+
+        const cueMatches = [...subtitleText.matchAll(/(?:^|\n)(\d+)\n(\d{2}:\d{2}:\d{2},\d{3}) --> (\d{2}:\d{2}:\d{2},\d{3})\n([^\n]+)(?=\n|$)/g)];
+        const toSeconds = (stamp: string) => {
+          const match = /^(\d{2}):(\d{2}):(\d{2}),(\d{3})$/.exec(stamp);
+          if (!match) return NaN;
+          return Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]) + Number(match[4]) / 1000;
+        };
+        let previousCueEnd = 0;
+        const cues = cueMatches.map((match, index) => {
+          const start = toSeconds(match[2]); const end = toSeconds(match[3]);
+          if (Number(match[1]) !== index + 1) issues.push("Subtitle cue numbering is not sequential.");
+          if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) issues.push(`Subtitle cue ${index + 1} has invalid timing.`);
+          if (Math.abs(start - previousCueEnd) > 0.001) issues.push(`Subtitle cue ${index + 1} has a gap or overlap.`);
+          previousCueEnd = end;
+          return { number: Number(match[1]), startSeconds: start, endSeconds: end, text: match[4] };
+        });
+        if (!cues.length) issues.push("No valid SRT cues could be parsed.");
+        if (typeof manifest.targetDurationSeconds === "number" && Math.abs(previousCueEnd - manifest.targetDurationSeconds) > 0.001) issues.push("Subtitle timeline does not end at the manifest target duration.");
+        const sceneNarration = tracks.map((track) => track.narrationText ?? "").join("");
+        const subtitleNarration = cues.map((cue) => cue.text).join(" ");
+        const normalized = (value: string) => value.replace(/\s+/g, " ").trim();
+        const narrationMatches = normalized(sceneNarration) === normalized(subtitleNarration);
+        if (!narrationMatches) issues.push("Subtitle cue text does not exactly reconstruct the scene narration.");
+
+        return response({
+          jobId, stage: job.stage, readOnly: true,
+          validation: { sceneCount: tracks.length, sceneDurationSeconds: expectedStart, subtitleCueCount: cues.length, subtitleDurationSeconds: previousCueEnd, narrationMatchesSubtitles: narrationMatches, hasTimingOrContentIssues: issues.length > 0, issues },
+          manifest, subtitlesSrt: subtitleText, parsedSubtitleCues: cues, providerStatus: manifest.providerStatus ?? {},
+          note: "Read-only retrieval. No KV records or job state were modified.",
+        });
+      } catch (error) { return failure(error); }
+    },
+  );
+
 }
