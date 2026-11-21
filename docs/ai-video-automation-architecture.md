@@ -124,3 +124,16 @@ Do not add an R2 binding, paid AI provider, or rendering infrastructure just bec
 - Responses use private/no-store caching, `nosniff`, no-referrer, and a fixed attachment filename. Other methods are rejected. The token URL is a bearer secret and must not be logged or exposed to browsers.
 - Configure `MEDIA_BASE_URL` as the HTTPS origin/base URL of this Worker. No audio URL is issued until this is configured. No CORS access is enabled.
 - This endpoint solves binary audio retrieval only. A trusted renderer still needs to request a fresh URL, download each scene audio, and integrate it into FFmpeg. The external renderer is not yet implemented.
+
+
+## Implemented AI scene image adapter (feature branch)
+
+- MCP tools: `generate_video_scene_image` and `create_video_image_download_link`.
+- Uses an optional OpenAI-compatible `/v1/images/generations` endpoint configured with Worker variables/secrets `IMAGE_API_URL`, `IMAGE_API_KEY`, and `IMAGE_MODEL`. No provider or credentials are selected by default.
+- Accepts only bounded `data[0].b64_json` PNG/JPEG output. Provider URLs are deliberately not fetched, avoiding arbitrary-URL/SSRF exposure.
+- Enforces a 6 MiB per-image storage cap, validates PNG/JPEG signatures, stores artifacts in user-scoped KV with 30-day expiry, and updates the scene manifest/job artifact references.
+- Renderer download links are opaque 256-bit bearer tokens scoped to one user's job/scene and expire after 10 minutes. `GET /media/image/:token` streams binary with private/no-store and nosniff headers.
+- Requires `MEDIA_BASE_URL` to be configured as the HTTPS Worker origin before issuing image links.
+- Tests cover successful generation and retrieval, missing provider configuration, invalid image bytes, and account isolation.
+
+This adapter is code-complete but not live-provider-validated until image provider credentials are configured. KV is still the current artifact store; a production renderer with durable object storage is a separate infrastructure step.
