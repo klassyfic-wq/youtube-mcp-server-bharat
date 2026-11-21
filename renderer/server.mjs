@@ -102,10 +102,24 @@ async function queueRenderUnlocked(jobId, manifest, edits = {}, revision = 0, is
       const latest = await loadJob(jobId) || record;
       await persistJob(jobId, { ...latest, executionName, updatedAt: new Date().toISOString() });
     } catch (error) {
-      await persistJob(jobId, { ...record, status: "failed", error: error instanceof Error ? error.message : "Cloud Run Job dispatch failed", updatedAt: new Date().toISOString() });
-      throw error;
+      // A network timeout can happen after Cloud Run accepted the execution.
+      // Never overwrite worker progress or automatically retry an ambiguous dispatch.
+      const latest = await loadJob(jobId) || record;
+      const message = error instanceof Error ? error.message : "Cloud Run Job dispatch outcome is unknown";
+      if (["rendering", "preview_ready", "failed"].includes(latest.status)) {
+        await persistJob(jobId, { ...latest, dispatchWarning: message, updatedAt: new Date().toISOString() });
+      } else {
+        await persistJob(jobId, {
+          ...latest,
+          status: "dispatch_unknown",
+          dispatchOutcomeUnknown: true,
+          error: message,
+          updatedAt: new Date().toISOString()
+        });
+      }
+      return { status: (await loadJob(jobId))?.status || "dispatch_unknown", dispatchOutcomeUnknown: true };
     }
-    return;
+    return { status: "queued", executionName };
   }
   void withJobLock(jobId, async () => {
     try {
@@ -123,6 +137,12 @@ async function runRenderWorkerUnlocked(jobId) {
   if (!/^[0-9a-f-]{36}$/i.test(jobId)) throw new Error("RENDER_JOB_ID is invalid.");
   const record = await loadJob(jobId);
   if (!record?.manifest) throw new Error("Render job manifest was not found on the shared persistent volume.");
+  if (record.status === "preview_ready" && record.previewPath) {
+    try {
+      await stat(record.previewPath);
+      return; // A retried execution must not render a completed job again.
+    } catch { /* Missing output: allow the worker to attempt recovery. */ }
+  }
   await persistJob(jobId, { ...record, status: "rendering", startedAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
   try {
     const result = await render(jobId, record.manifest, record.edits || {});
@@ -145,7 +165,9 @@ async function loadJob(jobId) {
     jobs.set(jobId, record);
     return record;
   } catch (error) {
-    if (error?.code === "ENOENT") return jobs.get(jobId) || null;
+    // The persisted record is authoritative. A stale process cache must never
+    // resurrect a deleted or not-yet-visible job record.
+    if (error?.code === "ENOENT") return null;
     throw error;
   }
 }
@@ -278,8 +300,8 @@ const app = http.createServer(async (req,res) => {
       const jobId = payload.jobId;
       if (typeof jobId !== "string" || !/^[0-9a-f-]{36}$/i.test(jobId)) return send(res,400,{error:"Invalid jobId"});
       validateManifest(payload.manifest);
-      await queueRender(jobId, payload.manifest, payload.edits || {}, 0);
-      return send(res, 202, { jobId, status: "queued", executionMode: CLOUD_RUN_JOBS_MODE ? "cloud-run-jobs" : "local" });
+      const queued = await queueRender(jobId, payload.manifest, payload.edits || {}, 0);
+      return send(res, 202, { jobId, status: queued?.status || "queued", dispatchOutcomeUnknown: queued?.dispatchOutcomeUnknown || false, executionMode: CLOUD_RUN_JOBS_MODE ? "cloud-run-jobs" : "local" });
     }
     const statusMatch = url.pathname.match(new RegExp("^/jobs/([0-9a-f-]{36})$", "i"));
     if (req.method === "GET" && statusMatch) {
@@ -287,7 +309,7 @@ const app = http.createServer(async (req,res) => {
       if (!record) return send(res,404,{error:"Render job not found"});
       if (CLOUD_RUN_JOBS_MODE && record.executionName) {
         try { record = await reconcileCloudRunExecution(statusMatch[1], record); }
-        catch (error) { process.stderr.write(`execution reconciliation failed for ${statusMatch[1]}: ${error instanceof Error ? error.message : "unknown error"}\\n`); }
+        catch (error) { process.stderr.write(`execution reconciliation failed for ${statusMatch[1]}: ${error instanceof Error ? error.message : "unknown error"}\n`); }
       }
       const { manifest: _manifest, previewPath: _path, ...publicRecord } = record;
       return send(res,200,publicRecord);
@@ -304,8 +326,8 @@ const app = http.createServer(async (req,res) => {
       const payload = await body(req);
       const record = await loadJob(match[1]);
       if (!record?.manifest) return send(res,404,{error:"Original render manifest is unavailable"});
-      await queueRender(match[1], record.manifest, payload.edits || {}, 0, true);
-      return send(res,202,{jobId:match[1],status:"queued",executionMode:CLOUD_RUN_JOBS_MODE ? "cloud-run-jobs" : "local"});
+      const queued = await queueRender(match[1], record.manifest, payload.edits || {}, 0, true);
+      return send(res,202,{jobId:match[1],status:queued?.status || "queued",dispatchOutcomeUnknown:queued?.dispatchOutcomeUnknown || false,executionMode:CLOUD_RUN_JOBS_MODE ? "cloud-run-jobs" : "local"});
     }
     return send(res,404,{error:"Not found"});
   } catch (error) { return send(res,400,{error:error instanceof Error ? error.message : "Render failed"}); }
