@@ -12,7 +12,7 @@ docker run --rm -p 8787:8787 \
   -v renderer-data:/data klassyfic-video-renderer
 ```
 
-The runtime requires persistent storage mounted at `/data`. It is not deployed by this repository change.
+The runtime requires persistent storage mounted at `/data`. On Cloud Run, mount a Cloud Storage bucket at this path; see [Cloud Run notes](./cloud-run/README.md). This repository change does not deploy GCP resources.
 
 ## API
 
@@ -29,6 +29,8 @@ Each manifest scene must include sequential `startSeconds`/`durationSeconds`, `i
 ## Important limits
 
 - This is a first external renderer adapter, not a managed/free hosting deployment.
-- The in-memory job index is lost on restart; the MP4 itself is persisted under `/data/:jobId/preview.mp4`. Production needs durable job metadata and object storage.
+- Job metadata is persisted under `/data/jobs/:jobId.json` and reloaded on startup. Jobs interrupted in `queued` or `rendering` state are marked failed and must be resubmitted.
+- MP4 previews are persisted under `/data/:jobId/preview.mp4` when `/data` is backed by a persistent volume.
+- The HTTP handler still runs FFmpeg asynchronously after returning HTTP 202. Cloud Run does not guarantee background execution after the response; see the Cloud Run notes. A Cloud Run Jobs dispatcher/worker is required before relying on this for live rendering.
 - Scene transitions currently render as hard cuts; transition-specific xfade support remains future work.
 - Only subtitle SRT edits are accepted in this initial preview revision. Scene transitions currently render as hard cuts. Do not expose the renderer publicly without TLS, rate limiting, a strong secret, and a persistent volume.
