@@ -237,7 +237,7 @@ export function registerYoutubeUploadTools(
         const userId = authProps?.userId;
         const token = await getToken(userId, env);
         const session = await loadSession(env, userId!, uploadId);
-        const response = await fetch(session.sessionUri, {
+        const response = await fetch(await decryptToken(session.sessionUriEncrypted, env.TOKEN_ENCRYPTION_KEY), {
           method: "PUT",
           headers: {
             Authorization: `Bearer ${token}`,
