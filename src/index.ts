@@ -11,6 +11,7 @@ import { registerAiVideoPlanningTools } from "./youtube-ai-planning-tools";
 import { registerVideoMediaManifestTools } from "./youtube-media-manifest-tools";
 import { registerVideoVoiceTools } from "./youtube-video-voice-tools";
 import { handleAudioArtifactRequest, registerAudioDeliveryTools } from "./youtube-audio-delivery";
+import { handleImageArtifactRequest, registerVideoImageTools } from "./youtube-video-image-tools";
 import type { Props } from "./utils";
 import { getValidGoogleAccessToken } from "./utils";
 
@@ -126,6 +127,7 @@ function createServer() {
   registerVideoMediaManifestTools(server, authProps, env);
   registerVideoVoiceTools(server, authProps, env);
   registerAudioDeliveryTools(server, authProps, env);
+  registerVideoImageTools(server, authProps, env);
   return server;
 }
 
