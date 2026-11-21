@@ -107,6 +107,24 @@ export function registerVideoRendererTools(server:McpServer,authProps:Props|unde
     }catch(e){return failure(e);}
   });
 
+  server.registerTool("edit_video_subtitles",{
+    description:"Submit revised SRT subtitle text for an existing preview and queue an FFmpeg re-render. This initial editing workflow supports subtitle changes only.",
+    inputSchema:{jobId:z.string().uuid(),subtitleSrt:z.string().min(1).max(200000)},
+  },async({jobId,subtitleSrt})=>{
+    try{
+      const userId=authProps?.userId;if(!userId)throw new Error("Authentication required.");
+      const raw=await env.OAUTH_KV.get(jobKey(userId,jobId));if(!raw)throw new Error("Video job not found or expired.");
+      const job=JSON.parse(raw) as Job;if(job.userId!==userId||job.stage!=="review")throw new Error("A rendered preview for this account is required before editing.");
+      const base=rendererBase(env);
+      const upstream=await fetch(new URL(`/preview/${jobId}`,base),{method:"POST",headers:{Authorization:`Bearer ${env.RENDERER_API_KEY}`,"Content-Type":"application/json"},body:JSON.stringify({edits:{subtitleSrt}}),signal:AbortSignal.timeout(30_000)});
+      if(upstream.status!==202)throw new Error(`Renderer edit endpoint returned HTTP ${upstream.status}.`);
+      const result=await upstream.json() as Record<string,unknown>;
+      job.stage="render";job.updatedAt=new Date().toISOString();
+      await env.OAUTH_KV.put(jobKey(userId,jobId),JSON.stringify(job),{expirationTtl:30*24*60*60});
+      return response({jobId,status:"rendering",rendererResult:result,note:"Subtitle revision queued. Poll get_video_render_status before opening the updated preview."});
+    }catch(e){return failure(e);}
+  });
+
   server.registerTool("create_video_preview_link",{
     description:"Issue a short-lived private preview URL for the rendered MP4. Treat the URL as a bearer secret.",
     inputSchema:{jobId:z.string().uuid()},
