@@ -11,6 +11,62 @@ const DATA_DIR = process.env.RENDERER_DATA_DIR || "/data";
 const ALLOWED_HOSTS = new Set((process.env.ASSET_HOST_ALLOWLIST || "").split(",").map(v => v.trim().toLowerCase()).filter(Boolean));
 const jobs = new Map();
 const JOBS_DIR = path.join(DATA_DIR, "jobs");
+const CLOUD_RUN_PROJECT = process.env.CLOUD_RUN_PROJECT;
+const CLOUD_RUN_LOCATION = process.env.CLOUD_RUN_LOCATION;
+const CLOUD_RUN_JOB = process.env.CLOUD_RUN_JOB;
+const CLOUD_RUN_JOBS_MODE = process.env.RENDER_EXECUTION_MODE === "cloud-run-jobs";
+
+async function googleAccessToken() {
+  const response = await fetch("http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token", {
+    headers: { "Metadata-Flavor": "Google" }, signal: AbortSignal.timeout(5000)
+  });
+  if (!response.ok) throw new Error(`Google metadata token request failed: HTTP ${response.status}`);
+  const data = await response.json();
+  if (typeof data.access_token !== "string") throw new Error("Google metadata did not return an access token.");
+  return data.access_token;
+}
+async function dispatchCloudRunJob(jobId) {
+  if (!CLOUD_RUN_PROJECT || !CLOUD_RUN_LOCATION || !CLOUD_RUN_JOB) throw new Error("Cloud Run Jobs mode requires CLOUD_RUN_PROJECT, CLOUD_RUN_LOCATION, and CLOUD_RUN_JOB.");
+  const token = await googleAccessToken();
+  const endpoint = `https://run.googleapis.com/v2/projects/${encodeURIComponent(CLOUD_RUN_PROJECT)}/locations/${encodeURIComponent(CLOUD_RUN_LOCATION)}/jobs/${encodeURIComponent(CLOUD_RUN_JOB)}:run`;
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify({ overrides: { containerOverrides: [{ env: [{ name: "RENDER_JOB_ID", value: jobId }] }] } }),
+    signal: AbortSignal.timeout(15000)
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(`Cloud Run Job dispatch failed: HTTP ${response.status}`);
+  return data.name || null;
+}
+async function queueRender(jobId, manifest, edits = {}, revision = 0) {
+  const record = { status: CLOUD_RUN_JOBS_MODE ? "queued" : "rendering", manifest, edits, revision, updatedAt: new Date().toISOString() };
+  await persistJob(jobId, record);
+  if (CLOUD_RUN_JOBS_MODE) {
+    try {
+      const executionName = await dispatchCloudRunJob(jobId);
+      await persistJob(jobId, { ...record, executionName, updatedAt: new Date().toISOString() });
+    } catch (error) {
+      await persistJob(jobId, { ...record, status: "failed", error: error instanceof Error ? error.message : "Cloud Run Job dispatch failed", updatedAt: new Date().toISOString() });
+      throw error;
+    }
+    return;
+  }
+  void render(jobId, manifest, edits).then(result => persistJob(jobId, { ...result, status: "preview_ready", manifest, revision: result.revision, updatedAt: new Date().toISOString() })).catch(error => persistJob(jobId, { ...record, status: "failed", error: error instanceof Error ? error.message : "Render failed", updatedAt: new Date().toISOString() }));
+}
+async function runRenderWorker(jobId) {
+  if (!/^[0-9a-f-]{36}$/i.test(jobId)) throw new Error("RENDER_JOB_ID is invalid.");
+  const record = await loadJob(jobId);
+  if (!record?.manifest) throw new Error("Render job manifest was not found on the shared persistent volume.");
+  await persistJob(jobId, { ...record, status: "rendering", startedAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+  try {
+    const result = await render(jobId, record.manifest, record.edits || {});
+    await persistJob(jobId, { ...result, status: "preview_ready", manifest: record.manifest, revision: result.revision, executionName: process.env.CLOUD_RUN_EXECUTION || null, updatedAt: new Date().toISOString() });
+  } catch (error) {
+    await persistJob(jobId, { ...record, status: "failed", error: error instanceof Error ? error.message : "Render failed", updatedAt: new Date().toISOString() });
+    throw error;
+  }
+}
 async function persistJob(jobId, record) {
   jobs.set(jobId, record);
   await writeFile(path.join(JOBS_DIR, `${jobId}.json`), JSON.stringify(record), "utf8");
@@ -156,9 +212,8 @@ const app = http.createServer(async (req,res) => {
       const jobId = payload.jobId;
       if (typeof jobId !== "string" || !/^[0-9a-f-]{36}$/i.test(jobId)) return send(res,400,{error:"Invalid jobId"});
       validateManifest(payload.manifest);
-      await persistJob(jobId, { status: "queued", manifest: payload.manifest, revision: 0, updatedAt: new Date().toISOString() });
-      void render(jobId, payload.manifest, payload.edits || {}).then(result => persistJob(jobId, { ...result, status: "preview_ready", manifest: payload.manifest, revision: result.revision, updatedAt: new Date().toISOString() })).catch(error => persistJob(jobId, { status: "failed", error: error instanceof Error ? error.message : "Render failed", manifest: payload.manifest, updatedAt: new Date().toISOString() }));
-      return send(res, 202, { jobId, status: "queued" });
+      await queueRender(jobId, payload.manifest, payload.edits || {}, 0);
+      return send(res, 202, { jobId, status: "queued", executionMode: CLOUD_RUN_JOBS_MODE ? "cloud-run-jobs" : "local" });
     }
     const statusMatch = url.pathname.match(new RegExp("^/jobs/([0-9a-f-]{36})$", "i"));
     if (req.method === "GET" && statusMatch) {
@@ -179,27 +234,32 @@ const app = http.createServer(async (req,res) => {
       const payload = await body(req);
       const record = await loadJob(match[1]);
       if (!record?.manifest) return send(res,404,{error:"Original render manifest is unavailable"});
-      await persistJob(match[1], { ...record, status: "rendering", updatedAt: new Date().toISOString() });
-      void render(match[1], record.manifest, payload.edits || {}).then(result => persistJob(match[1], { ...result, status: "preview_ready", manifest: record.manifest, revision: result.revision, updatedAt: new Date().toISOString() })).catch(error => persistJob(match[1], { ...record, status: "failed", error: error instanceof Error ? error.message : "Render failed", updatedAt: new Date().toISOString() }));
-      return send(res,202,{jobId:match[1],status:"rendering"});
+      await queueRender(match[1], record.manifest, payload.edits || {}, (record.revision || 0) + 1);
+      return send(res,202,{jobId:match[1],status:"queued",executionMode:CLOUD_RUN_JOBS_MODE ? "cloud-run-jobs" : "local"});
     }
     return send(res,404,{error:"Not found"});
   } catch (error) { return send(res,400,{error:error instanceof Error ? error.message : "Render failed"}); }
 });
 await mkdir(DATA_DIR, { recursive: true });
 await mkdir(JOBS_DIR, { recursive: true });
-for (const filename of await readdir(JOBS_DIR)) {
-  if (!filename.endsWith(".json")) continue;
-  try {
-    const jobId = filename.slice(0, -5);
-    const record = JSON.parse(await readFile(path.join(JOBS_DIR, filename), "utf8"));
-    if (record.status === "queued" || record.status === "rendering") {
-      record.status = "failed";
-      record.error = "Render was interrupted by a renderer restart; submit the render again.";
-      record.updatedAt = new Date().toISOString();
-      await writeFile(path.join(JOBS_DIR, filename), JSON.stringify(record), "utf8");
-    }
-    jobs.set(jobId, record);
-  } catch { /* Ignore an invalid job index entry; other jobs remain available. */ }
+if (process.env.RENDER_JOB_ID) {
+  try { await runRenderWorker(process.env.RENDER_JOB_ID); }
+  catch (error) { process.stderr.write(`render worker failed: ${error instanceof Error ? error.message : "unknown error"}\n`); process.exitCode = 1; }
+} else {
+  if (CLOUD_RUN_JOBS_MODE && (!CLOUD_RUN_PROJECT || !CLOUD_RUN_LOCATION || !CLOUD_RUN_JOB)) throw new Error("Cloud Run Jobs mode requires CLOUD_RUN_PROJECT, CLOUD_RUN_LOCATION, and CLOUD_RUN_JOB.");
+  for (const filename of await readdir(JOBS_DIR)) {
+    if (!filename.endsWith(".json")) continue;
+    try {
+      const jobId = filename.slice(0, -5);
+      const record = JSON.parse(await readFile(path.join(JOBS_DIR, filename), "utf8"));
+      if (record.status === "queued" || record.status === "rendering") {
+        record.status = "failed";
+        record.error = "Render was interrupted by a renderer restart; submit the render again.";
+        record.updatedAt = new Date().toISOString();
+        await writeFile(path.join(JOBS_DIR, filename), JSON.stringify(record), "utf8");
+      }
+      jobs.set(jobId, record);
+    } catch { /* Ignore an invalid job index entry; other jobs remain available. */ }
+  }
+  app.listen(PORT, "0.0.0.0", () => process.stdout.write(`renderer listening on ${PORT}\n`));
 }
-app.listen(PORT, "0.0.0.0", () => process.stdout.write(`renderer listening on ${PORT}\n`));
