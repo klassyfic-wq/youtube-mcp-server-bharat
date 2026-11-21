@@ -292,7 +292,7 @@ export function registerVideoMediaManifestTools(server: McpServer, authProps: Pr
         });
         if (!cues.length) issues.push("No valid SRT cues could be parsed.");
         if (typeof manifest.targetDurationSeconds === "number" && Math.abs(previousCueEnd - manifest.targetDurationSeconds) > 0.001) issues.push("Subtitle timeline does not end at the manifest target duration.");
-        const sceneNarration = tracks.map((track) => track.narrationText ?? "").join("");
+        const sceneNarration = tracks.map((track) => track.narrationText ?? "").join(" ");
         const subtitleNarration = cues.map((cue) => cue.text).join(" ");
         const normalized = (value: string) => value.replace(/\s+/g, " ").trim();
         const narrationMatches = normalized(sceneNarration) === normalized(subtitleNarration);
