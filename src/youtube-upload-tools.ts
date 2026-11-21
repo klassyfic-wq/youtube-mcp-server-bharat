@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import type { Props } from "./utils";
-import { getValidGoogleAccessToken } from "./utils";
+import { decryptToken, encryptToken, getValidGoogleAccessToken } from "./utils";
 
 type UploadEnv = Env;
 
@@ -12,7 +12,7 @@ const MIME_TYPES = ["video/mp4", "video/quicktime", "video/webm"] as const;
 
 type UploadSession = {
   userId: string;
-  sessionUri: string;
+  sessionUriEncrypted: string;
   totalBytes: number;
   contentType: (typeof MIME_TYPES)[number];
   nextOffset: number;
@@ -69,7 +69,7 @@ async function loadSession(env: UploadEnv, userId: string, uploadId: string): Pr
   if (!raw) throw new Error("Upload session not found or expired. Start a new upload.");
   const session = JSON.parse(raw) as UploadSession;
   if (session.userId !== userId) throw new Error("Upload session does not belong to this account.");
-  return session;
+  return { ...session, sessionUriEncrypted: session.sessionUriEncrypted };
 }
 
 export function registerYoutubeUploadTools(
@@ -128,7 +128,7 @@ export function registerYoutubeUploadTools(
         const uploadId = crypto.randomUUID();
         const session: UploadSession = {
           userId: userId!,
-          sessionUri,
+          sessionUriEncrypted: await encryptToken(sessionUri, env.TOKEN_ENCRYPTION_KEY),
           totalBytes,
           contentType,
           nextOffset: 0,
@@ -178,7 +178,7 @@ export function registerYoutubeUploadTools(
           throw new Error("Non-final chunks must be exactly 256 KiB.");
         }
 
-        const response = await fetch(session.sessionUri, {
+        const response = await fetch(await decryptToken(session.sessionUriEncrypted, env.TOKEN_ENCRYPTION_KEY), {
           method: "PUT",
           headers: {
             Authorization: `Bearer ${token}`,
