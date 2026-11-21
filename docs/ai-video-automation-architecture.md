@@ -149,3 +149,12 @@ This adapter is code-complete but not live-provider-validated until image provid
 - Initial renderer uses hard cuts; transition-specific xfade effects remain unimplemented. Renderer job metadata is currently in memory and must be moved to durable storage for production. The MP4 is persisted to the mounted `/data` volume.
 - Required Worker configuration: `MEDIA_BASE_URL`, `RENDERER_API_URL` (HTTPS origin), and secret `RENDERER_API_KEY`. Renderer runtime configuration: `RENDERER_SHARED_SECRET`, `ASSET_HOST_ALLOWLIST`, and persistent `/data` volume.
 - This is code/integration work only. The renderer still needs to be deployed on user-controlled compute, and the image/TTS providers need credentials before real assets can be generated.
+
+
+## GCP-backed media generation and rendering
+
+The Cloud Run media gateway exposes authenticated OpenAI-compatible image/TTS endpoints. It uses its attached Google service account to call Vertex AI Gemini image generation (`gemini-2.5-flash-image`) and Cloud Text-to-Speech Marathi Chirp 3 HD (`mr-IN-Chirp3-HD-Achird`). No service-account JSON keys or long-lived GCP tokens are stored in Cloudflare. The same shared secret is stored in Secret Manager on Cloud Run and as Worker secrets for renderer/image/TTS requests.
+
+Cloud Run Jobs mode runs FFmpeg as a one-shot task. The HTTP dispatcher and Job share a private Cloud Storage bucket mounted at `/data`; job metadata and MP4 previews are persisted there. Terraform in `infra/gcp` provisions the APIs, bucket, Artifact Registry, Secret Manager secret container, runtime identity/IAM, Cloud Run Service and Job. It does not create a secret version or deploy the Cloudflare Worker. See `infra/gcp/README.md` for deployment instructions.
+
+The renderer uses hard cuts (not xfade transitions), and subtitles are scene/word weighted rather than phoneme-aligned. Cloud Run shared-volume behavior must be smoke-tested before production reliance. GCP AI endpoints are metered; credits and budget alerts are not a hard spending cap.
