@@ -70,10 +70,15 @@ export function registerYoutubeManagementTools(
         const snippet = current.items?.[0]?.snippet;
         if (!snippet) throw new Error("Video not found or not accessible on this channel.");
 
+        // videos.update requires categoryId. Send only writable snippet fields;
+        // avoid echoing read-only API fields such as thumbnails and publishedAt.
         const updatedSnippet = {
-          ...snippet,
-          ...(title !== undefined ? { title } : {}),
-          ...(description !== undefined ? { description } : {}),
+          title: title ?? snippet.title,
+          description: description ?? snippet.description ?? "",
+          categoryId: snippet.categoryId,
+          ...(snippet.tags ? { tags: snippet.tags } : {}),
+          ...(snippet.defaultLanguage ? { defaultLanguage: snippet.defaultLanguage } : {}),
+          ...(snippet.defaultAudioLanguage ? { defaultAudioLanguage: snippet.defaultAudioLanguage } : {}),
           ...(tags !== undefined ? { tags } : {}),
         };
         const updated = await youtubeRequest(
