@@ -13,12 +13,12 @@ test("decodeChunk rejects malformed Base64", () => {
 });
 
 test("decodeChunk rejects empty chunks", () => {
-  assert.throws(() => decodeChunk(""), /valid standard Base64/);
+  assert.throws(() => decodeChunk(""), /between 1 byte and 256 KiB/);
 });
 
 test("decodeChunk rejects chunks larger than 256 KiB", () => {
   const oversized = Buffer.alloc(256 * 1024 + 1).toString("base64");
-  assert.throws(() => decodeChunk(oversized), /no larger than 256 KiB/);
+  assert.throws(() => decodeChunk(oversized), /between 1 byte and 256 KiB/);
 });
 
 test("nextOffsetFromRange converts YouTube inclusive Range to next byte", () => {
