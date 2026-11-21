@@ -68,6 +68,36 @@ function nextOffsetFromRange(range: string | null, totalBytes: number): number {
   return offset;
 }
 
+async function reconcileUploadAfterFailure(
+  session: UploadSession,
+  token: string,
+  env: UploadEnv,
+): Promise<{ nextOffset: number; video?: { id: string; title: string | null; privacyStatus: string | null } }> {
+  const response = await fetch(await decryptToken(session.sessionUriEncrypted, env.TOKEN_ENCRYPTION_KEY), {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Length": "0",
+      "Content-Range": `bytes */${session.totalBytes}`,
+    },
+  });
+  if (response.status === 308) {
+    return { nextOffset: nextOffsetFromRange(response.headers.get("Range"), session.totalBytes) };
+  }
+  if (response.status === 200 || response.status === 201) {
+    const video = await response.json() as { id?: string; status?: { privacyStatus?: string }; snippet?: { title?: string } };
+    if (!video.id) throw new Error("YouTube reports completion but returned no video ID.");
+    return {
+      nextOffset: session.totalBytes,
+      video: { id: video.id, title: video.snippet?.title ?? null, privacyStatus: video.status?.privacyStatus ?? null },
+    };
+  }
+  if (response.status === 404 || response.status === 410) {
+    throw new Error("YouTube upload session expired. Start a new upload.");
+  }
+  throw new Error(`Could not reconcile interrupted upload (HTTP ${response.status}).`);
+}
+
 async function loadSession(env: UploadEnv, userId: string, uploadId: string): Promise<UploadSession> {
   if (!/^[0-9a-f-]{36}$/i.test(uploadId)) throw new Error("Invalid uploadId.");
   const raw = await env.OAUTH_KV.get(sessionKey(userId, uploadId));
@@ -184,16 +214,49 @@ export function registerYoutubeUploadTools(
           throw new Error("Non-final chunks must be exactly 256 KiB.");
         }
 
-        const response = await fetch(await decryptToken(session.sessionUriEncrypted, env.TOKEN_ENCRYPTION_KEY), {
-          method: "PUT",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": session.contentType,
-            "Content-Length": String(bytes.length),
-            "Content-Range": `bytes ${offset}-${end}/${session.totalBytes}`,
-          },
-          body: bytes,
-        });
+        let response: Response | undefined;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            response = await fetch(await decryptToken(session.sessionUriEncrypted, env.TOKEN_ENCRYPTION_KEY), {
+              method: "PUT",
+              headers: {
+                Authorization: `Bearer ${token}`,
+                "Content-Type": session.contentType,
+                "Content-Length": String(bytes.length),
+                "Content-Range": `bytes ${offset}-${end}/${session.totalBytes}`,
+              },
+              body: bytes,
+            });
+          } catch (networkError) {
+            console.warn("Transient YouTube upload network error; reconciling resumable session.");
+            response = undefined;
+          }
+
+          if (response && ![500, 502, 503, 504].includes(response.status)) break;
+
+          const remote = await reconcileUploadAfterFailure(session, token, env);
+          if (remote.video) {
+            session.completedVideo = remote.video;
+            session.nextOffset = session.totalBytes;
+            await env.OAUTH_KV.put(sessionKey(userId!, uploadId), JSON.stringify(session), { expirationTtl: SESSION_TTL_SECONDS });
+            return result({ uploadId, complete: true, videoId: remote.video.id, title: remote.video.title, privacyStatus: remote.video.privacyStatus, videoUrl: `https://www.youtube.com/watch?v=${remote.video.id}` });
+          }
+          session.nextOffset = remote.nextOffset;
+          await env.OAUTH_KV.put(sessionKey(userId!, uploadId), JSON.stringify(session), { expirationTtl: SESSION_TTL_SECONDS });
+          if (remote.nextOffset === end + 1) {
+            return result({ uploadId, complete: false, nextOffset: remote.nextOffset, totalBytes: session.totalBytes, percentComplete: Number(((remote.nextOffset / session.totalBytes) * 100).toFixed(2)), recoveredAfterTransientFailure: true });
+          }
+          if (remote.nextOffset !== offset) {
+            throw new Error(`Upload state reconciled at byte ${remote.nextOffset}; resend from this exact offset.`);
+          }
+          if (attempt === 2) throw new Error("YouTube upload retry limit reached. Upload remains resumable; call get_video_upload_status before continuing.");
+          const retryAfter = response?.headers.get("Retry-After");
+          const delayMs = retryAfter && /^\\d+$/.test(retryAfter)
+            ? Math.min(Number(retryAfter) * 1000, 8000)
+            : Math.min(1000 * (2 ** attempt), 4000);
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+        }
+        if (!response) throw new Error("Upload request was interrupted; check upload status and resume from the confirmed offset.");
 
         if (response.status === 308) {
           const nextOffset = nextOffsetFromRange(response.headers.get("Range"), session.totalBytes);
