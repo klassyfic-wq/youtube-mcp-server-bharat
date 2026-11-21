@@ -36,7 +36,7 @@ Cloud Run Jobs injects `RENDER_JOB_ID` through the execution override. The conta
 - `POST /preview/:jobId` queues a new Job execution for subtitle edits.
 - `GET /preview/:jobId` serves the persisted MP4.
 
-If dispatch fails, the durable record is marked `failed` and the API returns an error. If a worker is terminated before it writes its terminal record, the dispatcher reconciles the Cloud Run v2 Execution during `GET /jobs/:jobId` polling. Terminal `Completed` conditions or `completionTime` with no persisted preview result mark the renderer job failed with a diagnostic message. This is request-driven reconciliation (not a background sweeper), so clients must poll status to trigger it. Concurrent edits to the same job are not serialized; do not enable multi-writer editing until a per-job lock/idempotency guard is added.
+If the dispatch request has an ambiguous network outcome, the durable record is marked `dispatch_unknown` and the API does not automatically retry: Cloud Run may already have accepted the execution. Inspect Cloud Run executions before manually retrying. If a worker is terminated before it writes its terminal record, the dispatcher reconciles the Cloud Run v2 Execution during `GET /jobs/:jobId` polling. Terminal `Completed` conditions or `completionTime` with no persisted preview result mark the renderer job failed with a diagnostic message. This is request-driven reconciliation (not a background sweeper), so clients must poll status to trigger it.
 
 ## Safety and cost
 
