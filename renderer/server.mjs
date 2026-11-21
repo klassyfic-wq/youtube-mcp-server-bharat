@@ -97,7 +97,7 @@ const app = http.createServer(async (req,res) => {
       const jobId = payload.jobId;
       if (typeof jobId !== "string" || !/^[0-9a-f-]{36}$/i.test(jobId)) return send(res,400,{error:"Invalid jobId"});
       const result = await render(jobId, payload.manifest, payload.edits || {});
-      jobs.set(jobId, { ...result, revision: result.revision });
+      jobs.set(jobId, { ...result, manifest, revision: result.revision });
       return send(res, 200, result);
     }
     const match = url.pathname.match(/^\/preview\/([0-9a-f-]{36})$/i);
