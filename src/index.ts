@@ -5,6 +5,7 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { createMcpHandler, getMcpAuthContext } from "agents/mcp/server";
 import { GoogleHandler } from "./google-handler";
 import { registerYoutubeManagementTools } from "./youtube-management-tools";
+import { registerYoutubeUploadTools } from "./youtube-upload-tools";
 import type { Props } from "./utils";
 import { getValidGoogleAccessToken } from "./utils";
 
@@ -114,6 +115,7 @@ function createServer() {
   );
 
   registerYoutubeManagementTools(server, authProps, env);
+  registerYoutubeUploadTools(server, authProps, env);
   return server;
 }
 
