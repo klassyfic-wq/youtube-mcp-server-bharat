@@ -29,6 +29,16 @@ async function youtubeRequest(url: string, token: string, init: RequestInit = {}
   return response.json() as Promise<any>;
 }
 
+function isValidCalendarDate(value: string): boolean {
+  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(0);
+  date.setUTCHours(0, 0, 0, 0);
+  date.setUTCFullYear(year, month - 1, day);
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+}
+
+const videoIdSchema = z.string().regex(/^[A-Za-z0-9_-]{11}$/, "videoId must be a valid 11-character YouTube video ID.");
 function result(value: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }] };
 }
@@ -51,7 +61,7 @@ export function registerYoutubeManagementTools(
     {
       description: "Update an existing YouTube video's title, description and/or tags. Existing fields are preserved when not supplied.",
       inputSchema: {
-        videoId: z.string().min(1).describe("YouTube video ID"),
+        videoId: videoIdSchema.describe("11-character YouTube video ID"),
         title: z.string().min(1).max(100).optional(),
         description: z.string().max(5000).optional(),
         tags: z.array(z.string().max(500)).max(500).optional().refine(
@@ -100,10 +110,11 @@ export function registerYoutubeManagementTools(
     "delete_video",
     {
       description: "Permanently delete a YouTube video owned by the authenticated channel. This action cannot be undone.",
-      inputSchema: { videoId: z.string().min(1).describe("YouTube video ID to permanently delete") },
+      inputSchema: { videoId: videoIdSchema.describe("11-character YouTube video ID to permanently delete"), confirmation: z.literal("DELETE").describe("Must be exactly DELETE to confirm this irreversible action") },
     },
-    async ({ videoId }) => {
+    async ({ videoId, confirmation }) => {
       try {
+        if (confirmation !== "DELETE") throw new Error("Deletion requires confirmation: set confirmation to DELETE.");
         const token = await getToken(authProps?.userId, env);
         await youtubeRequest(
           `https://www.googleapis.com/youtube/v3/videos?id=${encodeURIComponent(videoId)}`,
