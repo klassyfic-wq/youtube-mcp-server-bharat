@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
-import type { Props } from "./utils";
+import type { Props } from "./utils.ts";
 import { decryptToken, encryptToken, getValidGoogleAccessToken } from "./utils";
 
 type UploadEnv = Env;
