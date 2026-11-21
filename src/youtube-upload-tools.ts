@@ -231,6 +231,10 @@ export function registerYoutubeUploadTools(
           });
         }
 
+        if (response.status === 404 || response.status === 410) {
+          await env.OAUTH_KV.delete(sessionKey(userId!, uploadId));
+          throw new Error("YouTube upload session expired. Start a new upload.");
+        }
         console.error("YouTube chunk upload failed:", response.status);
         throw new Error(`YouTube rejected the video chunk (HTTP ${response.status}). Check upload status before retrying.`);
       } catch (error) {
