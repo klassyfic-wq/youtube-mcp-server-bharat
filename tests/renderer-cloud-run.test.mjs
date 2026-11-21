@@ -47,3 +47,10 @@ test("Cloud Run status polling reconciles terminal executions missing a worker r
   assert.match(source, /renderer did not persist a preview result/);
   assert.match(source, /reconcileCloudRunExecution\(statusMatch\[1\], record\)/);
 });
+
+test("Cloud Run reconciliation uses v2 Completed condition terminal states", async () => {
+  const source = await readFile("renderer/server.mjs", "utf8");
+  assert.match(source, /CONDITION_SUCCEEDED/);
+  assert.match(source, /CONDITION_FAILED/);
+  assert.match(source, /condition\.type === "Completed"/);
+});
