@@ -58,3 +58,89 @@ test("media manifest rejects cross-user or missing scene data", async () => {
   assert.equal(result.isError, true);
   assert.match(result.content[0].text, /not found|does not belong/);
 });
+
+
+test("saves structured approved plan under the exact KV keys read by manifest tool", async () => {
+  const kv = fakeKv();
+  const server = fakeServer();
+  const jobId = "861d38bc-7501-40a2-89af-d43ff0c1b370";
+  const userId = "manifest-user";
+  const script = {
+    title: "Welcome to Klassyfic Videos",
+    narration: "नमस्कार! स्वागत आहे Klassyfic Videos मध्ये! इथे मिळतील तुम्हाला नवनवीन माहिती, मनोरंजक गोष्टी आणि उपयोगी व्हिडिओ. चला, शिकूया काहीतरी नवीन!",
+    description: "Klassyfic Videos channel introduction.",
+    tags: ["Klassyfic Videos", "Introduction"],
+  };
+  const scenePlan = {
+    totalDurationSeconds: 15,
+    scenes: [
+      { sceneNumber: 1, durationSeconds: 4, narration: "नमस्कार! स्वागत आहे Klassyfic Videos मध्ये!", visualPrompt: "Klassyfic Videos logo reveal with energetic motion graphics", onScreenText: "Welcome to Klassyfic Videos", transition: "fade" },
+      { sceneNumber: 2, durationSeconds: 5, narration: "इथे मिळतील तुम्हाला नवनवीन माहिती, मनोरंजक गोष्टी", visualPrompt: "Fast montage of knowledge, technology and interesting topics", onScreenText: "नवीन माहिती", transition: "cut" },
+      { sceneNumber: 3, durationSeconds: 6, narration: "आणि उपयोगी व्हिडिओ. चला, शिकूया काहीतरी नवीन!", visualPrompt: "Channel name with the tagline revealed on a clean branded background", onScreenText: "नवीन माहिती, नवा अनुभव!", transition: "fade" },
+    ],
+  };
+  kv.values.set(`youtube:video-job:${userId}:${jobId}`, JSON.stringify({
+    jobId, userId, brief: { language: "Marathi", durationMinutes: 0.25, aspectRatio: "16:9" },
+    stage: "script", artifacts: { script: "manual:script", scenePlan: "manual:scenePlan" },
+    updatedAt: "2026-11-21T19:27:39.965Z",
+  }));
+  registerVideoMediaManifestTools(server, { userId }, { OAUTH_KV: kv });
+
+  const saved = parse(await server.handlers.get("save_approved_video_plan")({ jobId, script, scenePlan }));
+  assert.equal(saved.stage, "script");
+  assert.equal(saved.sceneCount, 3);
+  assert.equal(saved.totalDurationSeconds, 15);
+  assert.ok(kv.values.has(`youtube:video-script:${userId}:${jobId}`));
+  assert.ok(kv.values.has(`youtube:video-scenes:${userId}:${jobId}`));
+
+  const manifestResult = parse(await server.handlers.get("prepare_video_media_manifest")({ jobId }));
+  assert.equal(manifestResult.stage, "assets");
+  assert.equal(manifestResult.sceneCount, 3);
+  assert.equal(manifestResult.totalDurationSeconds, 15);
+  assert.equal(manifestResult.providerStatus.textToSpeech, "not_configured");
+  const manifest = JSON.parse(kv.values.get(`youtube:video-media-manifest:${userId}:${jobId}`));
+  assert.match(manifest.subtitles.content, /नमस्कार/);
+  assert.equal(manifest.voiceoverTracks.length, 3);
+  assert.equal(manifest.renderer.status, "not_started");
+});
+
+test("rejects invalid approved plan without writing dedicated artifacts or advancing stage", async () => {
+  const kv = fakeKv();
+  const server = fakeServer();
+  const jobId = "861d38bc-7501-40a2-89af-d43ff0c1b370";
+  const userId = "manifest-user";
+  const script = { title: "Welcome", narration: "नमस्कार!", description: "Intro", tags: [] };
+  const scenePlan = {
+    totalDurationSeconds: 20,
+    scenes: [{ sceneNumber: 1, durationSeconds: 15, narration: "नमस्कार!", visualPrompt: "A welcoming channel logo reveal", onScreenText: "Welcome", transition: "fade" }],
+  };
+  kv.values.set(`youtube:video-job:${userId}:${jobId}`, JSON.stringify({
+    jobId, userId, brief: { language: "Marathi", durationMinutes: 0.25, aspectRatio: "16:9" },
+    stage: "script", artifacts: {}, updatedAt: new Date().toISOString(),
+  }));
+  registerVideoMediaManifestTools(server, { userId }, { OAUTH_KV: kv });
+  const result = await server.handlers.get("save_approved_video_plan")({ jobId, script, scenePlan });
+  assert.equal(result.isError, true);
+  assert.equal(kv.values.has(`youtube:video-script:${userId}:${jobId}`), false);
+  assert.equal(kv.values.has(`youtube:video-scenes:${userId}:${jobId}`), false);
+  assert.equal(JSON.parse(kv.values.get(`youtube:video-job:${userId}:${jobId}`)).stage, "script");
+});
+
+test("does not overwrite plans after the job has advanced beyond script stage", async () => {
+  const kv = fakeKv();
+  const server = fakeServer();
+  const jobId = "861d38bc-7501-40a2-89af-d43ff0c1b370";
+  const userId = "manifest-user";
+  kv.values.set(`youtube:video-job:${userId}:${jobId}`, JSON.stringify({
+    jobId, userId, brief: { language: "Marathi", durationMinutes: 0.25, aspectRatio: "16:9" },
+    stage: "assets", artifacts: {}, updatedAt: new Date().toISOString(),
+  }));
+  registerVideoMediaManifestTools(server, { userId }, { OAUTH_KV: kv });
+  const result = await server.handlers.get("save_approved_video_plan")({
+    jobId,
+    script: { title: "Welcome", narration: "नमस्कार!", description: "Intro", tags: [] },
+    scenePlan: { totalDurationSeconds: 15, scenes: [{ sceneNumber: 1, durationSeconds: 15, narration: "नमस्कार!", visualPrompt: "A welcoming logo reveal", onScreenText: "Welcome", transition: "fade" }] },
+  });
+  assert.equal(result.isError, true);
+  assert.equal(kv.values.has(`youtube:video-script:${userId}:${jobId}`), false);
+});
