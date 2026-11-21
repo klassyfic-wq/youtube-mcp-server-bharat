@@ -318,4 +318,56 @@ export function registerYoutubeUploadTools(
       }
     },
   );
+  server.registerTool(
+    "upload_video_thumbnail",
+    {
+      description: "Set a custom JPEG or PNG thumbnail for a video on the authenticated channel. For MCP transport reliability, provide an image no larger than 2 MiB as Base64.",
+      inputSchema: {
+        videoId: z.string().regex(/^[A-Za-z0-9_-]{11}$/),
+        contentType: z.enum(["image/jpeg", "image/png"]),
+        imageBase64: z.string().min(4).max(2_800_000),
+      },
+    },
+    async ({ videoId, contentType, imageBase64 }) => {
+      try {
+        const userId = authProps?.userId;
+        const token = await getToken(userId, env);
+        if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(imageBase64)) {
+          throw new Error("imageBase64 must be valid standard Base64.");
+        }
+        const binary = atob(imageBase64);
+        if (binary.length === 0 || binary.length > 2 * 1024 * 1024) {
+          throw new Error("Thumbnail must be between 1 byte and 2 MiB for this MCP upload path.");
+        }
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        const isJpeg = bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+        const isPng = bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47 && bytes[4] === 0x0d && bytes[5] === 0x0a && bytes[6] === 0x1a && bytes[7] === 0x0a;
+        if ((contentType === "image/jpeg" && !isJpeg) || (contentType === "image/png" && !isPng)) {
+          throw new Error("Thumbnail bytes do not match the declared image content type.");
+        }
+        const response = await fetch(
+          `https://www.googleapis.com/upload/youtube/v3/thumbnails/set?videoId=${encodeURIComponent(videoId)}`,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": contentType,
+              "Content-Length": String(bytes.length),
+            },
+            body: bytes,
+          },
+        );
+        if (!response.ok) {
+          console.error("YouTube thumbnail upload failed:", response.status);
+          throw new Error(`YouTube rejected the thumbnail (HTTP ${response.status}). Verify video ownership and custom-thumbnail eligibility.`);
+        }
+        const data = await response.json() as { items?: Array<Record<string, unknown>> };
+        return result({ videoId, uploaded: true, thumbnails: data.items ?? [] });
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+
 }
