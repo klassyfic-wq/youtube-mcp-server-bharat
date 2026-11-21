@@ -106,7 +106,8 @@ export function registerVideoRendererTools(server:McpServer,authProps:Props|unde
       return response({jobId,status:status.status??"unknown",stage:job.stage,byteLength:status.byteLength,durationSeconds:status.durationSeconds,sceneCount:status.sceneCount,revision:status.revision,note:status.status==="preview_ready"?"Preview is ready for review. Call create_video_preview_link to watch it.": "Rendering is still in progress."});
     }catch(e){return failure(e);}
   });
-\n  server.registerTool("create_video_preview_link",{
+
+  server.registerTool("create_video_preview_link",{
     description:"Issue a short-lived private preview URL for the rendered MP4. Treat the URL as a bearer secret.",
     inputSchema:{jobId:z.string().uuid()},
   },async({jobId})=>{
