@@ -47,20 +47,18 @@ async function reconcileCloudRunExecution(jobId, record) {
   if (!response.ok) throw new Error(`Cloud Run execution lookup failed: HTTP ${response.status}`);
   const execution = await response.json();
   const conditions = Array.isArray(execution.conditions) ? execution.conditions : [];
-  const terminalFailure = conditions.find(condition =>
-    condition.state === "CONDITION_STATE_FALSE" &&
-    ["Completed", "ResourcesAvailable"].includes(condition.type)
-  );
-  const completed = Boolean(execution.completionTime);
-  if (!completed && !terminalFailure) return record;
-  const succeeded = conditions.some(condition => condition.type === "Completed" && condition.state === "CONDITION_STATE_TRUE");
+  const completedCondition = conditions.find(condition => condition.type === "Completed");
+  const terminal = Boolean(execution.completionTime) ||
+    ["CONDITION_SUCCEEDED", "CONDITION_FAILED"].includes(completedCondition?.state);
+  if (!terminal) return record;
+  const succeeded = completedCondition?.state === "CONDITION_SUCCEEDED";
   const next = {
     ...record,
-    status: succeeded ? "failed" : "failed",
+    status: "failed",
     error: succeeded
-      ? "Cloud Run execution completed but the renderer did not persist a preview result."
-      : "Cloud Run execution ended before the renderer persisted a preview result.",
-    executionState: execution.state || null,
+      ? "Cloud Run execution succeeded but no preview result was persisted; verify shared-volume consistency."
+      : "Cloud Run execution failed or was cancelled before a preview result was persisted.",
+    executionState: succeeded ? "succeeded" : "failed",
     updatedAt: new Date().toISOString()
   };
   await persistJob(jobId, next);
