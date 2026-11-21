@@ -180,16 +180,6 @@ export function registerYoutubeUploadTools(
           throw new Error("Non-final chunks must be exactly 256 KiB.");
         }
 
-        if (session.completedVideo) {
-          return result({
-            uploadId,
-            complete: true,
-            videoId: session.completedVideo.id,
-            title: session.completedVideo.title,
-            privacyStatus: session.completedVideo.privacyStatus,
-            videoUrl: `https://www.youtube.com/watch?v=${session.completedVideo.id}`,
-          });
-        }
         const response = await fetch(await decryptToken(session.sessionUriEncrypted, env.TOKEN_ENCRYPTION_KEY), {
           method: "PUT",
           headers: {
@@ -256,6 +246,16 @@ export function registerYoutubeUploadTools(
         const userId = authProps?.userId;
         const token = await getToken(userId, env);
         const session = await loadSession(env, userId!, uploadId);
+        if (session.completedVideo) {
+          return result({
+            uploadId,
+            complete: true,
+            videoId: session.completedVideo.id,
+            title: session.completedVideo.title,
+            privacyStatus: session.completedVideo.privacyStatus,
+            videoUrl: `https://www.youtube.com/watch?v=${session.completedVideo.id}`,
+          });
+        }
         const response = await fetch(await decryptToken(session.sessionUriEncrypted, env.TOKEN_ENCRYPTION_KEY), {
           method: "PUT",
           headers: {
