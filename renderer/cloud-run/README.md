@@ -3,7 +3,7 @@
 The renderer supports two explicit modes:
 
 - **Local mode** (default): the HTTP process renders asynchronously for local development only.
-- **Cloud Run Jobs mode**: set `RENDER_EXECUTION_MODE=cloud-run-jobs` on the private dispatcher service. The service writes the manifest and edit request to the shared `/data/jobs/<jobId>.json` volume, then calls the Cloud Run Jobs v2 `:run` API. The same image is used by the Job; set `RENDER_JOB_ID` as a Job execution override and the container runs exactly one render to completion, then exits.
+- **Cloud Run Jobs mode**: set `RENDER_EXECUTION_MODE=cloud-run-jobs` on the private dispatcher service. The service writes the manifest and edit request to the shared `/data/jobs/<jobId>.json` volume, then calls the Cloud Run Jobs v2 `:run` API. The response is a long-running Operation; the dispatcher persists the Execution resource name from the Operation metadata (not the Operation name) for subsequent status polling. The same image is used by the Job; set `RENDER_JOB_ID` as a Job execution override and the container runs exactly one render to completion, then exits.
 
 ## Required shared storage
 
@@ -21,7 +21,7 @@ Set these non-secret environment variables:
 - `RENDERER_SHARED_SECRET` from Secret Manager
 - `ASSET_HOST_ALLOWLIST` restricted to the Worker media hostname
 
-The service runtime identity obtains its short-lived access token from the Cloud Run metadata server and calls the Cloud Run Jobs v2 API. Grant it only `run.jobs.run` on the specific Job (typically via a narrowly scoped custom role or a supported predefined role). Do not place service-account keys or access tokens in environment variables or source.
+The service runtime identity obtains its short-lived access token from the Cloud Run metadata server and calls the Cloud Run Jobs v2 API. Grant it `run.jobs.run` and `run.jobs.runWithOverrides` on the specific Job because the request supplies a container environment override (typically via a narrowly scoped custom role or a supported predefined role). Do not place service-account keys or access tokens in environment variables or source.
 
 ## Job configuration
 
