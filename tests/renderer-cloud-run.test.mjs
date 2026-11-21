@@ -100,3 +100,10 @@ test("completed Cloud Run render is not repeated by a retried worker", async () 
   assert.match(source, /record\.status === "preview_ready" && record\.previewPath/);
   assert.match(source, /A retried execution must not render a completed job again/);
 });
+
+test("Cloud Run jobs.run stores the Execution resource name, not the long-running Operation name", async () => {
+  const source = await readFile("renderer/server.mjs", "utf8");
+  assert.match(source, /data\.metadata\?\.name \|\| data\.response\?\.name/);
+  assert.match(source, /executionName\.includes\("\/executions\/"\)/);
+  assert.match(source, /data\.name is the Operation name, not an Execution/);
+});
