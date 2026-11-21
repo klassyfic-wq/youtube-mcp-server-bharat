@@ -54,7 +54,10 @@ export function registerYoutubeManagementTools(
         videoId: z.string().min(1).describe("YouTube video ID"),
         title: z.string().min(1).max(100).optional(),
         description: z.string().max(5000).optional(),
-        tags: z.array(z.string().max(500)).max(500).optional(),
+        tags: z.array(z.string().max(500)).max(500).optional().refine(
+          (value) => value === undefined || value.reduce((total, tag) => total + tag.length, 0) <= 500,
+          "Combined tag length must not exceed 500 characters.",
+        ),
       },
     },
     async ({ videoId, title, description, tags }) => {
