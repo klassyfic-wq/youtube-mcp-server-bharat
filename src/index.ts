@@ -74,6 +74,84 @@ function createServer() {
 			}
 		},
 	);
+	server.registerTool(
+  "list_videos",
+  {
+    description: "List the latest 25 videos from the authenticated YouTube channel",
+  },
+  async () => {
+    if (!authProps?.userId) {
+      return {
+        content: [{ type: "text", text: "Authentication required." }],
+        isError: true,
+      };
+    }
+
+    try {
+      const accessToken = await getValidGoogleAccessToken(
+        authProps.userId,
+        env,
+      );
+
+      const headers = {
+        Authorization: `Bearer ${accessToken}`,
+      };
+
+      const channelResponse = await fetch(
+        "https://www.googleapis.com/youtube/v3/channels?part=contentDetails&mine=true",
+        { headers },
+      );
+
+      if (!channelResponse.ok) {
+        throw new Error(`YouTube API error: ${channelResponse.status}`);
+      }
+
+      const channelData: any = await channelResponse.json();
+      const playlistId =
+        channelData.items?.[0]?.contentDetails?.relatedPlaylists?.uploads;
+
+      if (!playlistId) {
+        return {
+          content: [{ type: "text", text: "No uploads playlist found." }],
+        };
+      }
+
+      const url = new URL(
+        "https://www.googleapis.com/youtube/v3/playlistItems",
+      );
+      url.search = new URLSearchParams({
+        part: "snippet,contentDetails",
+        playlistId,
+        maxResults: "25",
+      }).toString();
+
+      const response = await fetch(url, { headers });
+
+      if (!response.ok) {
+        throw new Error(`YouTube API error: ${response.status}`);
+      }
+
+      const data: any = await response.json();
+
+      const videos = (data.items ?? []).map((item: any) => ({
+        videoId: item.contentDetails?.videoId,
+        title: item.snippet?.title,
+        description: item.snippet?.description,
+        publishedAt: item.snippet?.publishedAt,
+      }));
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(videos, null, 2) }],
+      };
+    } catch (error) {
+      console.error("Video list failed:", error);
+      return {
+        content: [{ type: "text", text: "Failed to retrieve YouTube videos." }],
+        isError: true,
+      };
+    }
+  },
+);
 
 	return server;
 }
