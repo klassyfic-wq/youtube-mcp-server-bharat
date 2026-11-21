@@ -144,3 +144,65 @@ test("does not overwrite plans after the job has advanced beyond script stage", 
   assert.equal(result.isError, true);
   assert.equal(kv.values.has(`youtube:video-script:${userId}:${jobId}`), false);
 });
+
+
+test("get_video_media_manifest returns full manifest, SRT, and integrity diagnostics without writes", async () => {
+  const kv = fakeKv(), server = fakeServer();
+  const jobId = "861d38bc-7501-40a2-89af-d43ff0c1b370", userId = "manifest-reader";
+  const key = `youtube:video-job:${userId}:${jobId}`, manifestKey = `youtube:video-media-manifest:${userId}:${jobId}`;
+  const manifest = { jobId, targetDurationSeconds: 4, voiceoverTracks: [{ sceneNumber: 1, startSeconds: 0, durationSeconds: 4, narrationText: "नमस्कार!", visualRequest: { prompt: "Logo reveal" }, onScreenText: "Klassyfic Videos" }], subtitles: { format: "srt", content: "1\n00:00:00,000 --> 00:00:04,000\nनमस्कार!\n" }, providerStatus: { textToSpeech: "not_configured" } };
+  kv.values.set(key, JSON.stringify({ jobId, userId, stage: "assets", artifacts: { mediaManifest: `kv://${manifestKey}`, subtitles: `kv://${manifestKey}#subtitles` } }));
+  kv.values.set(manifestKey, JSON.stringify(manifest));
+  registerVideoMediaManifestTools(server, { userId }, { OAUTH_KV: kv });
+  const before = [...kv.values.entries()];
+  const result = parse(await server.handlers.get("get_video_media_manifest")({ jobId }));
+  assert.equal(result.readOnly, true); assert.equal(result.manifest.jobId, jobId);
+  assert.equal(result.subtitlesSrt, manifest.subtitles.content); assert.equal(result.validation.sceneCount, 1);
+  assert.equal(result.validation.subtitleCueCount, 1); assert.equal(result.validation.narrationMatchesSubtitles, true);
+  assert.deepEqual([...kv.values.entries()], before);
+});
+
+test("get_video_media_manifest rejects unauthenticated and cross-account access", async () => {
+  const kv = fakeKv(), server = fakeServer(), jobId = "861d38bc-7501-40a2-89af-d43ff0c1b370";
+  kv.values.set(`youtube:video-job:owner:${jobId}`, JSON.stringify({ jobId, userId: "owner", artifacts: {} }));
+  registerVideoMediaManifestTools(server, undefined, { OAUTH_KV: kv });
+  const unauth = await server.handlers.get("get_video_media_manifest")({ jobId });
+  assert.equal(unauth.isError, true); assert.match(unauth.content[0].text, /Authentication required/);
+  registerVideoMediaManifestTools(server, { userId: "other" }, { OAUTH_KV: kv });
+  const cross = await server.handlers.get("get_video_media_manifest")({ jobId });
+  assert.equal(cross.isError, true); assert.match(cross.content[0].text, /not found|does not belong/);
+});
+
+test("get_video_media_manifest rejects missing or mismatched artifact references", async () => {
+  const kv = fakeKv(), server = fakeServer(), jobId = "861d38bc-7501-40a2-89af-d43ff0c1b370", userId = "reader";
+  kv.values.set(`youtube:video-job:${userId}:${jobId}`, JSON.stringify({ jobId, userId, artifacts: { mediaManifest: "kv://wrong", subtitles: "kv://wrong#subtitles" } }));
+  registerVideoMediaManifestTools(server, { userId }, { OAUTH_KV: kv });
+  const result = await server.handlers.get("get_video_media_manifest")({ jobId });
+  assert.equal(result.isError, true); assert.match(result.content[0].text, /valid media manifest reference/);
+});
+
+test("get_video_media_manifest diagnoses bad SRT timing and subtitle text", async () => {
+  const kv = fakeKv(), server = fakeServer(), jobId = "861d38bc-7501-40a2-89af-d43ff0c1b370", userId = "reader";
+  const key = `youtube:video-job:${userId}:${jobId}`, mk = `youtube:video-media-manifest:${userId}:${jobId}`;
+  kv.values.set(key, JSON.stringify({ jobId, userId, artifacts: { mediaManifest: `kv://${mk}`, subtitles: `kv://${mk}#subtitles` } }));
+  kv.values.set(mk, JSON.stringify({ jobId, targetDurationSeconds: 2, voiceoverTracks: [{ sceneNumber: 1, startSeconds: 0, durationSeconds: 2, narrationText: "Hello", visualRequest: { prompt: "Visual" } }], subtitles: { format: "srt", content: "1\n00:00:00,500 --> 00:00:01,000\nWrong text\n" } }));
+  registerVideoMediaManifestTools(server, { userId }, { OAUTH_KV: kv });
+  const result = parse(await server.handlers.get("get_video_media_manifest")({ jobId }));
+  assert.equal(result.validation.narrationMatchesSubtitles, false); assert.equal(result.validation.hasTimingOrContentIssues, true);
+  assert.ok(result.validation.issues.some((x) => x.includes("gap or overlap")));
+  assert.ok(result.validation.issues.some((x) => x.includes("does not exactly reconstruct")));
+  kv.values.set(mk, JSON.stringify({ jobId, targetDurationSeconds: 2, voiceoverTracks: [], subtitles: { format: "srt", content: "" } }));
+  const missing = await server.handlers.get("get_video_media_manifest")({ jobId });
+  assert.equal(missing.isError, true); assert.match(missing.content[0].text, /SRT subtitles are missing/);
+});
+
+test("get_video_media_manifest handles missing job and manifest records", async () => {
+  const kv = fakeKv(), server = fakeServer(), jobId = "861d38bc-7501-40a2-89af-d43ff0c1b370", userId = "reader";
+  registerVideoMediaManifestTools(server, { userId }, { OAUTH_KV: kv });
+  const noJob = await server.handlers.get("get_video_media_manifest")({ jobId });
+  assert.equal(noJob.isError, true); assert.match(noJob.content[0].text, /Video job not found/);
+  const mk = `youtube:video-media-manifest:${userId}:${jobId}`;
+  kv.values.set(`youtube:video-job:${userId}:${jobId}`, JSON.stringify({ jobId, userId, artifacts: { mediaManifest: `kv://${mk}`, subtitles: `kv://${mk}#subtitles` } }));
+  const noManifest = await server.handlers.get("get_video_media_manifest")({ jobId });
+  assert.equal(noManifest.isError, true); assert.match(noManifest.content[0].text, /Saved media manifest not found/);
+});
