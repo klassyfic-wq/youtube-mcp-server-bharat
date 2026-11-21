@@ -1,32 +1,43 @@
-# Cloud Run deployment notes
+# Cloud Run deployment and execution model
 
-The renderer container is compatible with the Cloud Run container contract: it listens on `0.0.0.0:$PORT` and uses `/data` for durable output and job metadata.
+The renderer supports two explicit modes:
 
-## Persistent data
+- **Local mode** (default): the HTTP process renders asynchronously for local development only.
+- **Cloud Run Jobs mode**: set `RENDER_EXECUTION_MODE=cloud-run-jobs` on the private dispatcher service. The service writes the manifest and edit request to the shared `/data/jobs/<jobId>.json` volume, then calls the Cloud Run Jobs v2 `:run` API. The same image is used by the Job; set `RENDER_JOB_ID` as a Job execution override and the container runs exactly one render to completion, then exits.
 
-Mount a dedicated Cloud Storage bucket at `/data` using a Cloud Run Cloud Storage volume. Grant the Cloud Run runtime service account the minimum object permissions required to read and write that bucket. The renderer stores:
+## Required shared storage
 
-- MP4 previews under `/data/<jobId>/preview.mp4`
-- Job state and the original manifest under `/data/jobs/<jobId>.json`
+Mount the same dedicated Cloud Storage bucket at `/data` in **both** the dispatcher service and the Cloud Run Job. The worker reads the persisted manifest and writes the MP4 and final job record to this shared volume. Do not use instance-local writable storage for job metadata or output. Validate Cloud Storage FUSE consistency and write behavior with a real integration test before production use; this repository does not provision the bucket.
 
-On startup, the renderer reloads job records. Jobs left in `queued` or `rendering` state by a prior instance are marked failed with an explicit restart message instead of silently disappearing.
+## Dispatcher service configuration
 
-## Important execution-model blocker
+Set these non-secret environment variables:
 
-**Do not deploy this asynchronous HTTP renderer to Cloud Run as a production-ready service yet.** The current `POST /render` handler returns HTTP 202 and continues FFmpeg work in the background. Cloud Run request-based CPU allocation and instance lifecycle do not guarantee that background work will continue after the response is sent, especially when the service scales down.
+- `RENDER_EXECUTION_MODE=cloud-run-jobs`
+- `CLOUD_RUN_PROJECT=<project-id>`
+- `CLOUD_RUN_LOCATION=<job-region>`
+- `CLOUD_RUN_JOB=<job-name>`
+- `RENDERER_DATA_DIR=/data`
+- `RENDERER_SHARED_SECRET` from Secret Manager
+- `ASSET_HOST_ALLOWLIST` restricted to the Worker media hostname
 
-Before a live demo render, the execution model must be changed to one of:
+The service runtime identity obtains its short-lived access token from the Cloud Run metadata server and calls the Cloud Run Jobs v2 API. Grant it only `run.jobs.run` on the specific Job (typically via a narrowly scoped custom role or a supported predefined role). Do not place service-account keys or access tokens in environment variables or source.
 
-1. A Cloud Run Jobs worker that performs one render execution to completion, with the Cloud Run service acting only as a dispatcher/status API; or
-2. A request-held synchronous render design with a verified end-to-end request timeout budget.
+## Job configuration
 
-The Cloud Run Jobs approach is preferred for FFmpeg workloads. It requires a separate implementation and IAM setup; this repository change does not create or execute a Cloud Run Job.
+Use the same container image and mount the same bucket at `/data`. Keep the Job private and configure explicit task timeout, CPU, memory, task count (1), and retry count. The Job runtime identity needs the minimum Cloud Storage object read/write permissions on the dedicated bucket and outbound access to the allowlisted media host. The Job does not need the dispatcher shared secret.
 
-## Deployment safety
+Cloud Run Jobs injects `RENDER_JOB_ID` through the execution override. The container loads the record, marks it rendering, runs FFmpeg synchronously, persists `preview_ready` or `failed`, and exits with a matching process status. The service's existing `GET /jobs/:jobId` and `GET /preview/:jobId` endpoints continue to read the shared volume.
 
-- Do not create a service or bucket until the user approves the exact resources and confirms the expected billing impact.
-- Set CPU and memory limits, request timeout, concurrency, and maximum instances explicitly.
-- Use Secret Manager for `RENDERER_SHARED_SECRET`; never commit secrets.
-- Restrict `ASSET_HOST_ALLOWLIST` to the Cloudflare Worker media hostname.
-- Keep the Cloud Run service private where possible; require authenticated invocation.
-- A budget alert is notification-only and is not a hard spending cap.
+## API and limitations
+
+- `POST /render` persists the manifest, dispatches a Cloud Run Job and returns HTTP 202.
+- `GET /jobs/:jobId` polls the durable record written by the worker.
+- `POST /preview/:jobId` queues a new Job execution for subtitle edits.
+- `GET /preview/:jobId` serves the persisted MP4.
+
+If dispatch fails, the durable record is marked `failed` and the API returns an error. If a worker is terminated before it writes its terminal record, the record can remain `rendering`; add Cloud Run Execution reconciliation/timeout handling before production. Concurrent edits to the same job are not serialized; do not enable multi-writer editing until a per-job lock/idempotency guard is added.
+
+## Safety and cost
+
+No GCP resources are created by this code. Before deployment, confirm the exact region, bucket, service and Job settings, IAM bindings, quotas, and estimated cost. Budget alerts are notifications, not spending caps. Use Secret Manager, keep the dispatcher authenticated/private, and set maximum service instances and Job execution limits.
