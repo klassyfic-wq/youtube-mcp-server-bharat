@@ -18,7 +18,8 @@ type StoredJob = {
 };
 
 const TTL_SECONDS = 30 * 24 * 60 * 60;
-const MAX_AUDIO_BYTES = 20 * 1024 * 1024;
+// Base64 expands binary data by ~4/3; keep the JSON value below KV's 25 MiB value limit.
+const MAX_AUDIO_BYTES = 18 * 1024 * 1024;
 const jobKey = (userId: string, jobId: string) => `youtube:video-job:${userId}:${jobId}`;
 const manifestKey = (userId: string, jobId: string) => `youtube:video-media-manifest:${userId}:${jobId}`;
 const audioKey = (userId: string, jobId: string, sceneNumber: number) =>
