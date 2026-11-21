@@ -62,21 +62,21 @@ function srtTimestamp(seconds) {
 function buildTimedSubtitles(tracks, durations) {
   let cursor = 0, index = 1; const cues = [];
   tracks.forEach((track, sceneIndex) => {
-    const words = String(track.narrationText || "").trim().split(/\\s+/).filter(Boolean);
+    const words = String(track.narrationText || "").trim().split(/\s+/).filter(Boolean);
     if (!words.length) { cursor += durations[sceneIndex]; return; }
     const chunks = [];
     for (let i=0;i<words.length;i+=8) chunks.push(words.slice(i,i+8).join(" "));
-    const weights = chunks.map(chunk => Math.max(1,chunk.split(/\\s+/).length));
+    const weights = chunks.map(chunk => Math.max(1,chunk.split(/\s+/).length));
     const total = weights.reduce((a,b)=>a+b,0);
     let local = cursor;
     chunks.forEach((chunk,i) => {
       const end = i===chunks.length-1 ? cursor+durations[sceneIndex] : local+durations[sceneIndex]*(weights[i]/total);
-      cues.push(`${index++}\\n${srtTimestamp(local)} --> ${srtTimestamp(end)}\\n${chunk}\\n`);
+      cues.push(`${index++}\n${srtTimestamp(local)} --> ${srtTimestamp(end)}\n${chunk}\n`);
       local=end;
     });
     cursor += durations[sceneIndex];
   });
-  return cues.join("\\n");
+  return cues.join("\n");
 }
 function run(command, args) {
   return new Promise((resolve, reject) => {
