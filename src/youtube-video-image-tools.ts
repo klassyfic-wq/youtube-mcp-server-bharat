@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import type { Props } from "./utils.ts";
 
-type ImageEnv = Env & { IMAGE_API_URL?: string; IMAGE_API_KEY?: string; IMAGE_MODEL?: string };
+type ImageEnv = Env & { IMAGE_API_URL?: string; IMAGE_API_KEY?: string; IMAGE_MODEL?: string; MEDIA_BASE_URL?: string };
 type StoredJob = { jobId: string; userId: string; stage: string; artifacts: Record<string, string>; updatedAt: string };
 type VisualTrack = { sceneNumber: number; visualRequest: { prompt: string; aspectRatio: string }; imageArtifactRef?: string; imageStatus?: string };
 type Manifest = { jobId: string; voiceoverTracks: VisualTrack[]; providerStatus?: Record<string, string> };
