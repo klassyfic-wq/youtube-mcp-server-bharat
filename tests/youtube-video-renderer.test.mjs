@@ -24,7 +24,7 @@ test("renderer tool sends scene assets to async FFmpeg service and polls complet
     assert.equal(new Headers(init.headers).get("Authorization"),"Bearer renderer-secret");
     if(target.pathname==="/render"){sent=JSON.parse(init.body);return new Response(JSON.stringify({jobId,status:"queued"}),{status:202});}
     if(target.pathname===`/jobs/${jobId}`)return new Response(JSON.stringify({status:"preview_ready",byteLength:1234,durationSeconds:8,sceneCount:1,revision:1}),{status:200});
-    if(target.pathname===`/preview/${jobId}`)return new Response(new Uint8Array([0,0,0,1]),{status:200,headers:{"content-type":"video/mp4"}});
+    if(target.pathname===`/preview/${jobId}`&&init.method==="POST")return new Response(JSON.stringify({jobId,status:"rendering"}),{status:202});\n    if(target.pathname===`/preview/${jobId}`)return new Response(new Uint8Array([0,0,0,1]),{status:200,headers:{"content-type":"video/mp4"}});
     throw new Error("Unexpected renderer path");
   };
   try{
@@ -36,7 +36,7 @@ test("renderer tool sends scene assets to async FFmpeg service and polls complet
     const ready=parse(await server.handlers.get("get_video_render_status")({jobId}));
     assert.equal(ready.status,"preview_ready");
     assert.equal(JSON.parse(kv.values.get(`youtube:video-job:${userId}:${jobId}`)).stage,"review");
-    const link=parse(await server.handlers.get("create_video_preview_link")({jobId}));
+    const edit=parse(await server.handlers.get("edit_video_subtitles")({jobId,subtitleSrt:"1\\n00:00:00,000 --> 00:00:08,000\\nनमस्कार पुन्हा\\n"}));\n    assert.equal(edit.status,"rendering");\n    const afterEdit=parse(await server.handlers.get("get_video_render_status")({jobId}));\n    assert.equal(afterEdit.status,"preview_ready");\n    const link=parse(await server.handlers.get("create_video_preview_link")({jobId}));
     const preview=await handleVideoPreviewRequest(new Request(link.url),{...env,OAUTH_KV:kv});
     assert.equal(preview.status,200);
     assert.equal(preview.headers.get("content-type"),"video/mp4");
