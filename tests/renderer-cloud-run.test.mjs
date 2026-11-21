@@ -61,3 +61,21 @@ test("job reads refresh from shared storage instead of trusting a process cache"
   assert.doesNotMatch(loadBlock, /if \(jobs\.has\(jobId\)\) return jobs\.get\(jobId\)/);
   assert.match(loadBlock, /readFile\(path\.join\(JOBS_DIR/);
 });
+
+
+test("render submission and revision edits are serialized per job in one renderer process", async () => {
+  const source = await readFile("renderer/server.mjs", "utf8");
+  assert.match(source, /const jobLocks = new Map\(\)/);
+  assert.match(source, /async function withJobLock\(jobId, operation\)/);
+  assert.match(source, /return withJobLock\(jobId, \(\) => queueRenderUnlocked/);
+  assert.match(source, /return withJobLock\(jobId, \(\) => runRenderWorkerUnlocked/);
+  assert.match(source, /already active; wait for it to finish before editing/);
+  assert.match(source, /A render job with this jobId already exists/);
+  assert.match(source, /revision = \(existing\.revision \|\| 0\) \+ 1/);
+});
+
+test("edit requests derive their manifest and revision from the latest persisted job", async () => {
+  const source = await readFile("renderer/server.mjs", "utf8");
+  assert.match(source, /if \(isEdit\)[\s\S]*?manifest = existing\.manifest;[\s\S]*?revision = \(existing\.revision \|\| 0\) \+ 1/);
+  assert.match(source, /queueRender\(match\[1\], record\.manifest, payload\.edits \|\| \{\}, 0, true\)/);
+});
