@@ -156,8 +156,8 @@ const app = http.createServer(async (req,res) => {
       const jobId = payload.jobId;
       if (typeof jobId !== "string" || !/^[0-9a-f-]{36}$/i.test(jobId)) return send(res,400,{error:"Invalid jobId"});
       validateManifest(payload.manifest);
-      jobs.set(jobId, { status: "queued", manifest: payload.manifest, revision: 0, updatedAt: new Date().toISOString() });
-      void render(jobId, payload.manifest, payload.edits || {}).then(result => jobs.set(jobId, { ...result, status: "preview_ready", manifest: payload.manifest, revision: result.revision, updatedAt: new Date().toISOString() })).catch(error => jobs.set(jobId, { status: "failed", error: error instanceof Error ? error.message : "Render failed", manifest: payload.manifest, updatedAt: new Date().toISOString() }));
+      await persistJob(jobId, { status: "queued", manifest: payload.manifest, revision: 0, updatedAt: new Date().toISOString() });
+      void render(jobId, payload.manifest, payload.edits || {}).then(result => persistJob(jobId, { ...result, status: "preview_ready", manifest: payload.manifest, revision: result.revision, updatedAt: new Date().toISOString() })).catch(error => persistJob(jobId, { status: "failed", error: error instanceof Error ? error.message : "Render failed", manifest: payload.manifest, updatedAt: new Date().toISOString() }));
       return send(res, 202, { jobId, status: "queued" });
     }
     const statusMatch = url.pathname.match(new RegExp("^/jobs/([0-9a-f-]{36})$", "i"));
@@ -179,12 +179,27 @@ const app = http.createServer(async (req,res) => {
       const payload = await body(req);
       const record = await loadJob(match[1]);
       if (!record?.manifest) return send(res,404,{error:"Original render manifest is unavailable"});
-      jobs.set(match[1], { ...record, status: "rendering", updatedAt: new Date().toISOString() });
-      void render(match[1], record.manifest, payload.edits || {}).then(result => jobs.set(match[1], { ...result, status: "preview_ready", manifest: record.manifest, revision: result.revision, updatedAt: new Date().toISOString() })).catch(error => jobs.set(match[1], { ...record, status: "failed", error: error instanceof Error ? error.message : "Render failed", updatedAt: new Date().toISOString() }));
+      await persistJob(match[1], { ...record, status: "rendering", updatedAt: new Date().toISOString() });
+      void render(match[1], record.manifest, payload.edits || {}).then(result => persistJob(match[1], { ...result, status: "preview_ready", manifest: record.manifest, revision: result.revision, updatedAt: new Date().toISOString() })).catch(error => persistJob(match[1], { ...record, status: "failed", error: error instanceof Error ? error.message : "Render failed", updatedAt: new Date().toISOString() }));
       return send(res,202,{jobId:match[1],status:"rendering"});
     }
     return send(res,404,{error:"Not found"});
   } catch (error) { return send(res,400,{error:error instanceof Error ? error.message : "Render failed"}); }
 });
 await mkdir(DATA_DIR, { recursive: true });
+await mkdir(JOBS_DIR, { recursive: true });
+for (const filename of await readdir(JOBS_DIR)) {
+  if (!filename.endsWith(".json")) continue;
+  try {
+    const jobId = filename.slice(0, -5);
+    const record = JSON.parse(await readFile(path.join(JOBS_DIR, filename), "utf8"));
+    if (record.status === "queued" || record.status === "rendering") {
+      record.status = "failed";
+      record.error = "Render was interrupted by a renderer restart; submit the render again.";
+      record.updatedAt = new Date().toISOString();
+      await writeFile(path.join(JOBS_DIR, filename), JSON.stringify(record), "utf8");
+    }
+    jobs.set(jobId, record);
+  } catch { /* Ignore an invalid job index entry; other jobs remain available. */ }
+}
 app.listen(PORT, "0.0.0.0", () => process.stdout.write(`renderer listening on ${PORT}\n`));
