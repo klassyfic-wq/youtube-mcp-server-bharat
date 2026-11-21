@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { z } from "zod";
 import OAuthProvider from "@cloudflare/workers-oauth-provider";
 import { McpServer } from "@modelcontextprotocol/server";
 import { createMcpHandler, getMcpAuthContext } from "agents/mcp/server";
@@ -51,8 +52,8 @@ function createServer() {
     {
       description: "List videos from the authenticated YouTube channel. Supports pagination up to 50 videos per page.",
       inputSchema: {
-        maxResults: (await import("zod")).z.number().int().min(1).max(50).optional(),
-        pageToken: (await import("zod")).z.string().optional(),
+        maxResults: z.number().int().min(1).max(50).optional(),
+        pageToken: z.string().optional(),
       },
     },
     async ({ maxResults, pageToken }) => {
