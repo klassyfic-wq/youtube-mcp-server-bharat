@@ -39,9 +39,14 @@ resource "google_storage_bucket" "media" {
   uniform_bucket_level_access = true
   public_access_prevention    = "enforced"
   force_destroy               = false
+
   lifecycle_rule {
-    action { type = "Delete" }
-    condition { age = 7 }
+    action {
+      type = "Delete"
+    }
+    condition {
+      age = 7
+    }
   }
   depends_on = [google_project_service.apis]
 }
@@ -55,7 +60,10 @@ resource "google_service_account" "renderer" {
 resource "google_secret_manager_secret" "renderer_shared_secret" {
   project   = var.project_id
   secret_id = "klassyfic-renderer-shared-secret"
-  replication { auto {} }
+
+  replication {
+    auto {}
+  }
   depends_on = [google_project_service.apis]
 }
 
@@ -105,34 +113,67 @@ resource "google_project_iam_member" "renderer_job_dispatcher" {
 }
 
 resource "google_cloud_run_v2_job" "renderer" {
-  project  = var.project_id
-  name     = "klassyfic-video-renderer-job"
-  location = var.region
+  project             = var.project_id
+  name                = "klassyfic-video-renderer-job"
+  location            = var.region
   deletion_protection = false
+
   template {
     parallelism = 1
     task_count  = 1
+
     template {
       service_account = google_service_account.renderer.email
       max_retries     = 0
       timeout         = "3600s"
+
       containers {
         image = var.renderer_image
-        resources { limits = { cpu = "2", memory = "4Gi" } }
-        env { name = "RENDERER_DATA_DIR" value = "/data" }
-        env { name = "GOOGLE_CLOUD_PROJECT" value = var.project_id }
-        env { name = "VERTEX_AI_LOCATION" value = "global" }
-        env { name = "VERTEX_IMAGE_MODEL" value = "gemini-2.5-flash-image" }
-        env { name = "GOOGLE_TTS_VOICE" value = "mr-IN-Chirp3-HD-Achird" }
-        volume_mounts { name = "renderer-data" mount_path = "/data" }
+
+        resources {
+          limits = {
+            cpu    = "2"
+            memory = "4Gi"
+          }
+        }
+        env {
+          name  = "RENDERER_DATA_DIR"
+          value = "/data"
+        }
+        env {
+          name  = "GOOGLE_CLOUD_PROJECT"
+          value = var.project_id
+        }
+        env {
+          name  = "VERTEX_AI_LOCATION"
+          value = "global"
+        }
+        env {
+          name  = "VERTEX_IMAGE_MODEL"
+          value = "gemini-2.5-flash-image"
+        }
+        env {
+          name  = "GOOGLE_TTS_VOICE"
+          value = "mr-IN-Chirp3-HD-Achird"
+        }
+        volume_mounts {
+          name       = "renderer-data"
+          mount_path = "/data"
+        }
       }
+
       volumes {
         name = "renderer-data"
-        gcs { bucket = google_storage_bucket.media.name }
+        gcs {
+          bucket = google_storage_bucket.media.name
+        }
       }
     }
   }
-  depends_on = [google_project_service.apis, google_storage_bucket_iam_member.renderer_storage]
+  depends_on = [
+    google_project_service.apis,
+    google_storage_bucket_iam_member.renderer_storage
+  ]
 }
 
 resource "google_cloud_run_v2_service" "renderer" {
@@ -141,26 +182,72 @@ resource "google_cloud_run_v2_service" "renderer" {
   location            = var.region
   ingress             = "INGRESS_TRAFFIC_ALL"
   deletion_protection = false
+
   template {
     service_account                  = google_service_account.renderer.email
     timeout                          = "3600s"
     max_instance_request_concurrency = 1
-    scaling { max_instance_count = 1 }
+
+    scaling {
+      max_instance_count = 1
+    }
+
     containers {
       image = var.renderer_image
-      ports { container_port = 8787 }
-      resources { limits = { cpu = "2", memory = "4Gi" } }
-      env { name = "PORT" value = "8787" }
-      env { name = "RENDERER_DATA_DIR" value = "/data" }
-      env { name = "RENDER_EXECUTION_MODE" value = "cloud-run-jobs" }
-      env { name = "CLOUD_RUN_PROJECT" value = var.project_id }
-      env { name = "CLOUD_RUN_LOCATION" value = var.region }
-      env { name = "CLOUD_RUN_JOB" value = google_cloud_run_v2_job.renderer.name }
-      env { name = "GOOGLE_CLOUD_PROJECT" value = var.project_id }
-      env { name = "VERTEX_AI_LOCATION" value = "global" }
-      env { name = "VERTEX_IMAGE_MODEL" value = "gemini-2.5-flash-image" }
-      env { name = "GOOGLE_TTS_VOICE" value = "mr-IN-Chirp3-HD-Achird" }
-      env { name = "ASSET_HOST_ALLOWLIST" value = var.worker_host }
+
+      ports {
+        container_port = 8787
+      }
+      resources {
+        limits = {
+          cpu    = "2"
+          memory = "4Gi"
+        }
+      }
+      env {
+        name  = "PORT"
+        value = "8787"
+      }
+      env {
+        name  = "RENDERER_DATA_DIR"
+        value = "/data"
+      }
+      env {
+        name  = "RENDER_EXECUTION_MODE"
+        value = "cloud-run-jobs"
+      }
+      env {
+        name  = "CLOUD_RUN_PROJECT"
+        value = var.project_id
+      }
+      env {
+        name  = "CLOUD_RUN_LOCATION"
+        value = var.region
+      }
+      env {
+        name  = "CLOUD_RUN_JOB"
+        value = google_cloud_run_v2_job.renderer.name
+      }
+      env {
+        name  = "GOOGLE_CLOUD_PROJECT"
+        value = var.project_id
+      }
+      env {
+        name  = "VERTEX_AI_LOCATION"
+        value = "global"
+      }
+      env {
+        name  = "VERTEX_IMAGE_MODEL"
+        value = "gemini-2.5-flash-image"
+      }
+      env {
+        name  = "GOOGLE_TTS_VOICE"
+        value = "mr-IN-Chirp3-HD-Achird"
+      }
+      env {
+        name  = "ASSET_HOST_ALLOWLIST"
+        value = var.worker_host
+      }
       env {
         name = "RENDERER_SHARED_SECRET"
         value_source {
@@ -170,13 +257,20 @@ resource "google_cloud_run_v2_service" "renderer" {
           }
         }
       }
-      volume_mounts { name = "renderer-data" mount_path = "/data" }
+      volume_mounts {
+        name       = "renderer-data"
+        mount_path = "/data"
+      }
     }
+
     volumes {
       name = "renderer-data"
-      gcs { bucket = google_storage_bucket.media.name }
+      gcs {
+        bucket = google_storage_bucket.media.name
+      }
     }
   }
+
   depends_on = [
     google_project_service.apis,
     google_secret_manager_secret_iam_member.renderer_secret_access,
@@ -200,6 +294,15 @@ output "renderer_url" {
   value       = google_cloud_run_v2_service.renderer.uri
   description = "Set as RENDERER_API_URL; append /v1/images/generations and /v1/audio/speech for provider endpoints."
 }
-output "bucket_name" { value = google_storage_bucket.media.name }
-output "service_account_email" { value = google_service_account.renderer.email }
-output "renderer_job_name" { value = google_cloud_run_v2_job.renderer.name }
+
+output "bucket_name" {
+  value = google_storage_bucket.media.name
+}
+
+output "service_account_email" {
+  value = google_service_account.renderer.email
+}
+
+output "renderer_job_name" {
+  value = google_cloud_run_v2_job.renderer.name
+}
