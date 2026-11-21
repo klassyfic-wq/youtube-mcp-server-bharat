@@ -97,18 +97,19 @@ async function runRenderWorker(jobId) {
   }
 }
 async function persistJob(jobId, record) {
-  jobs.set(jobId, record);
   await writeFile(path.join(JOBS_DIR, `${jobId}.json`), JSON.stringify(record), "utf8");
+  jobs.set(jobId, record);
   return record;
 }
 async function loadJob(jobId) {
-  if (jobs.has(jobId)) return jobs.get(jobId);
+  // Always read the shared volume first: another Cloud Run instance / Job
+  // execution may have updated this record since this process cached it.
   try {
     const record = JSON.parse(await readFile(path.join(JOBS_DIR, `${jobId}.json`), "utf8"));
     jobs.set(jobId, record);
     return record;
   } catch (error) {
-    if (error?.code === "ENOENT") return null;
+    if (error?.code === "ENOENT") return jobs.get(jobId) || null;
     throw error;
   }
 }
