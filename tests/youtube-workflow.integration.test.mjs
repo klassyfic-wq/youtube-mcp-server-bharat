@@ -139,7 +139,7 @@ test("video production workflow enforces review before publish approval", async 
     confirmation: "APPROVE_PUBLIC_PUBLISH",
   }));
   assert.ok(approved.publishApprovedAt);
-  assert.match(approved.note, /does not change YouTube visibility/);
+  assert.match(approved.note, /separate, explicit YouTube publish operation is still required/);
 });
 
 
