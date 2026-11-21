@@ -83,7 +83,9 @@ app.post("/authorize", async (c) => {
 		if (!state.oauthReqInfo?.clientId) {
 			return c.text("Invalid request", 400);
 		}
-
+console.log("OAuth secret availability:", {
+  cookieEncryptionKeyPresent: Boolean(c.env.COOKIE_ENCRYPTION_KEY),
+});
 		const approvedClientCookie = await addApprovedClient(
 			c.req.raw,
 			state.oauthReqInfo.clientId,
