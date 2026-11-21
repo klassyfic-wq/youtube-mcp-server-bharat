@@ -7,6 +7,7 @@ import { GoogleHandler } from "./google-handler";
 import { registerYoutubeManagementTools } from "./youtube-management-tools";
 import { registerYoutubeUploadTools } from "./youtube-upload-tools";
 import { registerVideoWorkflowTools } from "./youtube-video-workflow-tools";
+import { registerAiVideoPlanningTools } from "./youtube-ai-planning-tools";
 import type { Props } from "./utils";
 import { getValidGoogleAccessToken } from "./utils";
 
@@ -118,6 +119,7 @@ function createServer() {
   registerYoutubeManagementTools(server, authProps, env);
   registerYoutubeUploadTools(server, authProps, env);
   registerVideoWorkflowTools(server, authProps, env);
+  registerAiVideoPlanningTools(server, authProps, env);
   return server;
 }
 
