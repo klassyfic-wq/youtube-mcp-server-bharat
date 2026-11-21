@@ -30,7 +30,7 @@ This is a staged, provider-agnostic design. It must not require paid AI subscrip
 8. **Publish** — default to private/unlisted staging where supported. Change visibility to public or schedule only after explicit approval.
 9. **Verify and clean up** — confirm the returned video ID and status, report the YouTube URL, and delete temporary staged media after a retention window or successful verification.
 
-## Component boundaries
+## Implemented planning tools (feature branch)\n\n- `generate_video_script` uses an optional OpenAI-compatible HTTPS chat-completions endpoint configured through Worker environment variables/secrets (`AI_API_URL`, `AI_API_KEY`, `AI_MODEL`). It validates the structured script and stores it in per-user KV with the existing 30-day job retention.\n- `plan_video_scenes` converts that saved script into timed scenes with narration, visual prompts, on-screen text, and transitions. It validates sequential numbering and total duration within 10% of the requested duration before saving.\n- Both tools require the authenticated job owner. If provider settings are absent, they fail clearly without changing job state. No provider is selected or invoked by default; do not add a paid provider or secrets until a free-first provider decision is approved.\n- These tools create text planning artifacts only. They do not generate images, voice, music, subtitles, or rendered video.\n\n## Component boundaries
 
 ### A. AI orchestration layer
 - Converts natural-language requests into a validated job specification.
