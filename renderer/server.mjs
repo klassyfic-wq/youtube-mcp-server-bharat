@@ -10,6 +10,7 @@ const SECRET = process.env.RENDERER_SHARED_SECRET;
 const DATA_DIR = process.env.RENDERER_DATA_DIR || "/data";
 const ALLOWED_HOSTS = new Set((process.env.ASSET_HOST_ALLOWLIST || "").split(",").map(v => v.trim().toLowerCase()).filter(Boolean));
 const jobs = new Map();
+const jobLocks = new Map();
 const JOBS_DIR = path.join(DATA_DIR, "jobs");
 const CLOUD_RUN_PROJECT = process.env.CLOUD_RUN_PROJECT;
 const CLOUD_RUN_LOCATION = process.env.CLOUD_RUN_LOCATION;
@@ -64,7 +65,32 @@ async function reconcileCloudRunExecution(jobId, record) {
   await persistJob(jobId, next);
   return next;
 }
-async function queueRender(jobId, manifest, edits = {}, revision = 0) {
+async function withJobLock(jobId, operation) {
+  const previous = jobLocks.get(jobId) || Promise.resolve();
+  let release;
+  const current = new Promise(resolve => { release = resolve; });
+  jobLocks.set(jobId, current);
+  await previous;
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (jobLocks.get(jobId) === current) jobLocks.delete(jobId);
+  }
+}
+async function queueRender(jobId, manifest, edits = {}, revision = 0, isEdit = false) {
+  return withJobLock(jobId, () => queueRenderUnlocked(jobId, manifest, edits, revision, isEdit));
+}
+async function queueRenderUnlocked(jobId, manifest, edits = {}, revision = 0, isEdit = false) {
+  const existing = await loadJob(jobId);
+  if (isEdit) {
+    if (!existing?.manifest) throw new Error("Original render manifest is unavailable.");
+    if (["queued", "rendering"].includes(existing.status)) throw new Error("This render job is already active; wait for it to finish before editing.");
+    manifest = existing.manifest;
+    revision = (existing.revision || 0) + 1;
+  } else if (existing) {
+    throw new Error("A render job with this jobId already exists; use the preview edit endpoint to create a new revision.");
+  }
   const record = { status: CLOUD_RUN_JOBS_MODE ? "queued" : "rendering", manifest, edits, revision, updatedAt: new Date().toISOString() };
   await persistJob(jobId, record);
   if (CLOUD_RUN_JOBS_MODE) {
@@ -84,6 +110,9 @@ async function queueRender(jobId, manifest, edits = {}, revision = 0) {
   void render(jobId, manifest, edits).then(result => persistJob(jobId, { ...result, status: "preview_ready", manifest, revision: result.revision, updatedAt: new Date().toISOString() })).catch(error => persistJob(jobId, { ...record, status: "failed", error: error instanceof Error ? error.message : "Render failed", updatedAt: new Date().toISOString() }));
 }
 async function runRenderWorker(jobId) {
+  return withJobLock(jobId, () => runRenderWorkerUnlocked(jobId));
+}
+async function runRenderWorkerUnlocked(jobId) {
   if (!/^[0-9a-f-]{36}$/i.test(jobId)) throw new Error("RENDER_JOB_ID is invalid.");
   const record = await loadJob(jobId);
   if (!record?.manifest) throw new Error("Render job manifest was not found on the shared persistent volume.");
@@ -268,7 +297,7 @@ const app = http.createServer(async (req,res) => {
       const payload = await body(req);
       const record = await loadJob(match[1]);
       if (!record?.manifest) return send(res,404,{error:"Original render manifest is unavailable"});
-      await queueRender(match[1], record.manifest, payload.edits || {}, (record.revision || 0) + 1);
+      await queueRender(match[1], record.manifest, payload.edits || {}, 0, true);
       return send(res,202,{jobId:match[1],status:"queued",executionMode:CLOUD_RUN_JOBS_MODE ? "cloud-run-jobs" : "local"});
     }
     return send(res,404,{error:"Not found"});
