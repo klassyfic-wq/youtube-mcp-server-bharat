@@ -38,7 +38,13 @@ async function dispatchCloudRunJob(jobId) {
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(`Cloud Run Job dispatch failed: HTTP ${response.status}`);
-  return data.name || null;
+  // jobs.run returns a long-running Operation. Its metadata carries the
+  // Execution resource; data.name is the Operation name, not an Execution.
+  const executionName = data.metadata?.name || data.response?.name;
+  if (typeof executionName !== "string" || !executionName.includes("/executions/")) {
+    throw new Error("Cloud Run jobs.run response did not include an Execution resource name.");
+  }
+  return executionName;
 }
 async function reconcileCloudRunExecution(jobId, record) {
   if (!CLOUD_RUN_JOBS_MODE || !record.executionName || !["queued", "rendering"].includes(record.status)) return record;
