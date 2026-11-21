@@ -107,3 +107,12 @@ test("Cloud Run jobs.run stores the Execution resource name, not the long-runnin
   assert.match(source, /executionName\.includes\("\/executions\/"\)/);
   assert.match(source, /data\.name is the Operation name, not an Execution/);
 });
+
+test("renderer overlays scene on-screen text using a Devanagari-capable font", async () => {
+  const source = await readFile("renderer/server.mjs", "utf8");
+  const docker = await readFile("renderer/Dockerfile", "utf8");
+  assert.match(source, /track\.onScreenText/);
+  assert.match(source, /drawtext=fontfile=\/usr\/share\/fonts\/truetype\/noto\/NotoSansDevanagari-Regular\.ttf/);
+  assert.match(source, /scene-\$\{index\}\.overlay\.txt/);
+  assert.match(docker, /fonts-noto-core/);
+});
