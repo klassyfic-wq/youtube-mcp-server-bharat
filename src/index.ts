@@ -149,11 +149,17 @@ const oauthProvider = new OAuthProvider<Env>({
   resourceMetadata: { resource: env.MCP_RESOURCE },
 });
 
-
 export default {
   fetch(request: Request, env: Env, ctx: ExecutionContext) {
-    if (new URL(request.url).pathname.startsWith("/media/audio/")) {
+    const pathname = new URL(request.url).pathname;
+    if (pathname.startsWith("/media/audio/")) {
       return handleAudioArtifactRequest(request, env);
+    }
+    if (pathname.startsWith("/media/image/")) {
+      return handleImageArtifactRequest(request, env);
+    }
+    if (pathname.startsWith("/media/preview/")) {
+      return handleVideoPreviewRequest(request, env);
     }
     return oauthProvider.fetch(request, env, ctx);
   },
