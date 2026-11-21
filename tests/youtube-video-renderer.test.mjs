@@ -38,6 +38,9 @@ test("renderer tool sends scene assets to async FFmpeg service and polls complet
     assert.equal(ready.status,"preview_ready");
     assert.equal(JSON.parse(kv.values.get(`youtube:video-job:${userId}:${jobId}`)).stage,"review");
     const edit=parse(await server.handlers.get("edit_video_subtitles")({jobId,subtitleSrt:"1\n00:00:00,000 --> 00:00:08,000\nनमस्कार पुन्हा\n"}));
+    assert.equal(edit.status,"rendering");
+    const afterEdit=parse(await server.handlers.get("get_video_render_status")({jobId}));
+    assert.equal(afterEdit.status,"preview_ready");
     const link=parse(await server.handlers.get("create_video_preview_link")({jobId}));
     const preview=await handleVideoPreviewRequest(new Request(link.url),{...env,OAUTH_KV:kv});
     assert.equal(preview.status,200);
