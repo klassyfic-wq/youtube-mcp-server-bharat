@@ -69,7 +69,7 @@ export function registerVideoRendererTools(server:McpServer,authProps:Props|unde
         if(!await env.OAUTH_KV.get(akey)||!await env.OAUTH_KV.get(ikey))throw new Error(`Scene ${track.sceneNumber} media artifact is missing.`);
         const at=randomToken(),it=randomToken();
         await Promise.all([
-          env.OAUTH_KV.put(audioGrantKey(at),JSON.stringify({audioKey:akey,userId,jobId,sceneNumber:track.sceneNumber,expiresAt:now+600000}),{expirationTtl:600}),
+          env.OAUTH_KV.put(audioGrantKey(at),JSON.stringify({audioKey:akey,userId,jobId,sceneNumber:track.sceneNumber,expiresAt:now+1800000}),{expirationTtl:1800}),
           env.OAUTH_KV.put(imageGrantKey(it),JSON.stringify({imageKey:ikey,userId,jobId,sceneNumber:track.sceneNumber,expiresAt:now+600000}),{expirationTtl:600}),
         ]);
         tracks.push({...track,audioUrl:new URL(`/media/audio/${at}`,base).toString(),imageUrl:new URL(`/media/image/${it}`,base).toString()});
