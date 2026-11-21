@@ -103,7 +103,7 @@ async function render(jobId, manifest, edits = {}) {
   const finalDir = path.resolve(DATA_DIR, jobId);
   try {
     await mkdir(finalDir, { recursive: true });
-    const clips = [];
+    const clips = []; const actualDurations = [];
     const width = manifest.aspectRatio === "9:16" ? 1080 : manifest.aspectRatio === "1:1" ? 1080 : 1920;
     const height = manifest.aspectRatio === "9:16" ? 1920 : manifest.aspectRatio === "1:1" ? 1080 : 1080;
     for (const [index, track] of tracks.entries()) {
@@ -111,7 +111,9 @@ async function render(jobId, manifest, edits = {}) {
       const audio = path.join(work, `scene-${index}.audio`);
       const clip = path.join(work, `clip-${index}.mp4`);
       await Promise.all([download(track.imageUrl, image, 8*1024*1024), download(track.audioUrl, audio, 20*1024*1024)]);
-      const audioDuration = await probeDuration(audio);\n      const durationForScene = Number(Math.max(track.durationSeconds, audioDuration).toFixed(3));\n      actualDurations.push(durationForScene);
+      const audioDuration = await probeDuration(audio);
+      const durationForScene = Number(Math.max(track.durationSeconds, audioDuration).toFixed(3));
+      actualDurations.push(durationForScene);
       await run("ffmpeg", ["-y","-loop","1","-framerate","30","-i",image,"-i",audio,"-t",String(durationForScene),"-vf",`scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1,fps=30`,"-af",`apad,atrim=duration=${durationForScene}`,"-c:v","libx264","-preset","veryfast","-pix_fmt","yuv420p","-c:a","aac","-b:a","192k","-ar","48000","-movflags","+faststart","-shortest",clip]);
       clips.push(clip);
     }
@@ -141,14 +143,14 @@ const app = http.createServer(async (req,res) => {
       void render(jobId, payload.manifest, payload.edits || {}).then(result => jobs.set(jobId, { ...result, status: "preview_ready", manifest: payload.manifest, revision: result.revision, updatedAt: new Date().toISOString() })).catch(error => jobs.set(jobId, { status: "failed", error: error instanceof Error ? error.message : "Render failed", manifest: payload.manifest, updatedAt: new Date().toISOString() }));
       return send(res, 202, { jobId, status: "queued" });
     }
-    const statusMatch = url.pathname.match(/^\\/jobs\\/([0-9a-f-]{36})$/i);
+    const statusMatch = url.pathname.match(/^\/jobs\/([0-9a-f-]{36})$/i);
     if (req.method === "GET" && statusMatch) {
       const record = jobs.get(statusMatch[1]);
       if (!record) return send(res,404,{error:"Render job not found"});
       const { manifest: _manifest, previewPath: _path, ...publicRecord } = record;
       return send(res,200,publicRecord);
     }
-    const match = url.pathname.match(/^\\/preview\\/([0-9a-f-]{36})$/i);
+    const match = url.pathname.match(/^\/preview\/([0-9a-f-]{36})$/i);
     if (req.method === "GET" && match) {
       const jobId = match[1]; const record = jobs.get(jobId);
       if (!record || record.status !== "preview_ready" || !record.previewPath) return send(res,404,{error:"Preview not found"});
