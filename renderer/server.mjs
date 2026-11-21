@@ -143,14 +143,14 @@ const app = http.createServer(async (req,res) => {
       void render(jobId, payload.manifest, payload.edits || {}).then(result => jobs.set(jobId, { ...result, status: "preview_ready", manifest: payload.manifest, revision: result.revision, updatedAt: new Date().toISOString() })).catch(error => jobs.set(jobId, { status: "failed", error: error instanceof Error ? error.message : "Render failed", manifest: payload.manifest, updatedAt: new Date().toISOString() }));
       return send(res, 202, { jobId, status: "queued" });
     }
-    const statusMatch = url.pathname.match(/^\/jobs\/([0-9a-f-]{36})$/i);
+    const statusMatch = url.pathname.match(new RegExp("^/jobs/([0-9a-f-]{36})$", "i"));
     if (req.method === "GET" && statusMatch) {
       const record = jobs.get(statusMatch[1]);
       if (!record) return send(res,404,{error:"Render job not found"});
       const { manifest: _manifest, previewPath: _path, ...publicRecord } = record;
       return send(res,200,publicRecord);
     }
-    const match = url.pathname.match(/^\/preview\/([0-9a-f-]{36})$/i);
+    const match = url.pathname.match(new RegExp("^/preview/([0-9a-f-]{36})$", "i"));
     if (req.method === "GET" && match) {
       const jobId = match[1]; const record = jobs.get(jobId);
       if (!record || record.status !== "preview_ready" || !record.previewPath) return send(res,404,{error:"Preview not found"});
