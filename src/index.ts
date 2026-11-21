@@ -10,6 +10,7 @@ import { registerVideoWorkflowTools } from "./youtube-video-workflow-tools";
 import { registerAiVideoPlanningTools } from "./youtube-ai-planning-tools";
 import { registerVideoMediaManifestTools } from "./youtube-media-manifest-tools";
 import { registerVideoVoiceTools } from "./youtube-video-voice-tools";
+import { handleAudioArtifactRequest, registerAudioDeliveryTools } from "./youtube-audio-delivery";
 import type { Props } from "./utils";
 import { getValidGoogleAccessToken } from "./utils";
 
@@ -124,6 +125,7 @@ function createServer() {
   registerAiVideoPlanningTools(server, authProps, env);
   registerVideoMediaManifestTools(server, authProps, env);
   registerVideoVoiceTools(server, authProps, env);
+  registerAudioDeliveryTools(server, authProps, env);
   return server;
 }
 
@@ -131,7 +133,10 @@ const mcpHandler = createMcpHandler(createServer);
 
 export default new OAuthProvider<Env>({
   apiHandler: {
-    fetch(request: Request, env: Env, ctx: ExecutionContext) {
+    async fetch(request: Request, env: Env, ctx: ExecutionContext) {
+      if (new URL(request.url).pathname.startsWith("/media/audio/")) {
+        return handleAudioArtifactRequest(request, env);
+      }
       return mcpHandler(request, env, ctx);
     },
   },
