@@ -35,7 +35,7 @@ For Cloud Run, set `RENDER_EXECUTION_MODE=cloud-run-jobs` and configure `CLOUD_R
 - This is a renderer adapter, not a managed/free hosting deployment.
 - Job metadata is persisted under `/data/jobs/:jobId.json`; MP4 previews are persisted under `/data/:jobId/preview.mp4`. Both require the same persistent volume to be mounted in the dispatcher and worker.
 - Local mode still renders asynchronously after HTTP 202 and is intended for local development only. Cloud Run Jobs mode dispatches a separate one-shot worker.
-- Worker termination before writing a terminal status can leave a record in `rendering`; Cloud Run execution reconciliation is still needed before production.
-- Concurrent edits to one job are not serialized; do not enable multi-writer editing until a per-job lock/idempotency guard is added.
+- Worker termination before writing a terminal status can leave a record in `rendering`; Cloud Run execution reconciliation marks terminal executions without a persisted preview as failed when status is polled.
+- Submissions, edits, and worker execution are serialized with an in-process per-job mutex. This is not a distributed lock: it does not coordinate separate dispatcher instances or separate Cloud Run Job executions. Use a single dispatcher instance and prevent duplicate Job dispatches operationally until a storage-backed lease/atomic conditional-write coordinator is implemented and integration-tested.
 - Scene transitions currently render as hard cuts; transition-specific xfade support remains future work.
 - Only subtitle SRT edits are accepted in this initial preview revision. Scene transitions currently render as hard cuts. Do not expose the renderer publicly without TLS, rate limiting, a strong secret, and a persistent volume.
