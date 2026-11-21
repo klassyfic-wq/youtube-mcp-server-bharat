@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
-import type { Props } from "./utils";
+import type { Props } from "./utils.ts";
 
 type VideoJobEnv = Env;
 type VideoStage = "brief" | "script" | "assets" | "render" | "review" | "upload" | "completed";
