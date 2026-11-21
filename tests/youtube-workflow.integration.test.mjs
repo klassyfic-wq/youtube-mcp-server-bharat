@@ -120,10 +120,11 @@ test("video production workflow enforces review before publish approval", async 
   }));
   assert.equal(created.stage, "brief");
 
-  await assert.rejects(
-    server.handlers.get("approve_video_publish")({ jobId: created.jobId, confirmation: "APPROVE_PUBLIC_PUBLISH" }),
-    /./,
-  ).catch(() => {});
+  const prematureApproval = await server.handlers.get("approve_video_publish")({
+    jobId: created.jobId,
+    confirmation: "APPROVE_PUBLIC_PUBLISH",
+  });
+  assert.equal(prematureApproval.isError, true);
 
   const reviewed = parseToolResult(await server.handlers.get("update_video_job")({
     jobId: created.jobId,
