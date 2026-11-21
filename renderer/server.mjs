@@ -96,14 +96,22 @@ const app = http.createServer(async (req,res) => {
       const payload = await body(req);
       const jobId = payload.jobId;
       if (typeof jobId !== "string" || !/^[0-9a-f-]{36}$/i.test(jobId)) return send(res,400,{error:"Invalid jobId"});
-      const result = await render(jobId, payload.manifest, payload.edits || {});
-      jobs.set(jobId, { ...result, manifest, revision: result.revision });
-      return send(res, 200, result);
+      validateManifest(payload.manifest);
+      jobs.set(jobId, { status: "queued", manifest: payload.manifest, revision: 0, updatedAt: new Date().toISOString() });
+      void render(jobId, payload.manifest, payload.edits || {}).then(result => jobs.set(jobId, { ...result, status: "preview_ready", manifest: payload.manifest, revision: result.revision, updatedAt: new Date().toISOString() })).catch(error => jobs.set(jobId, { status: "failed", error: error instanceof Error ? error.message : "Render failed", manifest: payload.manifest, updatedAt: new Date().toISOString() }));
+      return send(res, 202, { jobId, status: "queued" });
     }
-    const match = url.pathname.match(/^\/preview\/([0-9a-f-]{36})$/i);
+    const statusMatch = url.pathname.match(/^\\/jobs\\/([0-9a-f-]{36})$/i);
+    if (req.method === "GET" && statusMatch) {
+      const record = jobs.get(statusMatch[1]);
+      if (!record) return send(res,404,{error:"Render job not found"});
+      const { manifest: _manifest, previewPath: _path, ...publicRecord } = record;
+      return send(res,200,publicRecord);
+    }
+    const match = url.pathname.match(/^\\/preview\\/([0-9a-f-]{36})$/i);
     if (req.method === "GET" && match) {
       const jobId = match[1]; const record = jobs.get(jobId);
-      if (!record) return send(res,404,{error:"Preview not found"});
+      if (!record || record.status !== "preview_ready" || !record.previewPath) return send(res,404,{error:"Preview not found"});
       const bytes = await readFile(record.previewPath);
       res.writeHead(200, { "content-type":"video/mp4", "content-length":bytes.length, "cache-control":"private, no-store", "x-content-type-options":"nosniff", "content-disposition":`inline; filename="${jobId}-preview.mp4"` });
       return res.end(bytes);
@@ -112,9 +120,9 @@ const app = http.createServer(async (req,res) => {
       const payload = await body(req);
       const record = jobs.get(match[1]);
       if (!record?.manifest) return send(res,404,{error:"Original render manifest is unavailable"});
-      const result = await render(match[1], record.manifest, payload.edits || {});
-      jobs.set(match[1], { ...result, manifest: record.manifest });
-      return send(res,200,result);
+      jobs.set(match[1], { ...record, status: "rendering", updatedAt: new Date().toISOString() });
+      void render(match[1], record.manifest, payload.edits || {}).then(result => jobs.set(match[1], { ...result, status: "preview_ready", manifest: record.manifest, revision: result.revision, updatedAt: new Date().toISOString() })).catch(error => jobs.set(match[1], { ...record, status: "failed", error: error instanceof Error ? error.message : "Render failed", updatedAt: new Date().toISOString() }));
+      return send(res,202,{jobId:match[1],status:"rendering"});
     }
     return send(res,404,{error:"Not found"});
   } catch (error) { return send(res,400,{error:error instanceof Error ? error.message : "Render failed"}); }
