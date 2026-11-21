@@ -38,6 +38,46 @@ async function download(url, target, maxBytes) {
   if (!bytes.length || bytes.length > maxBytes) throw new Error("Downloaded asset is empty or exceeds its size limit.");
   await writeFile(target, bytes);
 }
+function capture(command, args) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = ""; let stderr = "";
+    child.stdout.on("data", chunk => { stdout += chunk.toString(); });
+    child.stderr.on("data", chunk => { stderr += chunk.toString(); if (stderr.length > 4000) stderr = stderr.slice(-4000); });
+    child.on("error", reject);
+    child.on("close", code => code === 0 ? resolve(stdout.trim()) : reject(new Error(`${command} exited ${code}: ${stderr}`)));
+  });
+}
+async function probeDuration(file) {
+  const value = await capture("ffprobe", ["-v","error","-show_entries","format=duration","-of","default=noprint_wrappers=1:nokey=1",file]);
+  const duration = Number(value);
+  if (!Number.isFinite(duration) || duration <= 0 || duration > 3600) throw new Error("Unable to determine a valid voiceover audio duration.");
+  return duration;
+}
+function srtTimestamp(seconds) {
+  const ms = Math.max(0, Math.round(seconds * 1000));
+  const h = Math.floor(ms / 3600000), m = Math.floor(ms % 3600000 / 60000), s = Math.floor(ms % 60000 / 1000), milli = ms % 1000;
+  return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")},${String(milli).padStart(3,"0")}`;
+}
+function buildTimedSubtitles(tracks, durations) {
+  let cursor = 0, index = 1; const cues = [];
+  tracks.forEach((track, sceneIndex) => {
+    const words = String(track.narrationText || "").trim().split(/\\s+/).filter(Boolean);
+    if (!words.length) { cursor += durations[sceneIndex]; return; }
+    const chunks = [];
+    for (let i=0;i<words.length;i+=8) chunks.push(words.slice(i,i+8).join(" "));
+    const weights = chunks.map(chunk => Math.max(1,chunk.split(/\\s+/).length));
+    const total = weights.reduce((a,b)=>a+b,0);
+    let local = cursor;
+    chunks.forEach((chunk,i) => {
+      const end = i===chunks.length-1 ? cursor+durations[sceneIndex] : local+durations[sceneIndex]*(weights[i]/total);
+      cues.push(`${index++}\\n${srtTimestamp(local)} --> ${srtTimestamp(end)}\\n${chunk}\\n`);
+      local=end;
+    });
+    cursor += durations[sceneIndex];
+  });
+  return cues.join("\\n");
+}
 function run(command, args) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { stdio: ["ignore", "ignore", "pipe"] });
@@ -71,7 +111,7 @@ async function render(jobId, manifest, edits = {}) {
       const audio = path.join(work, `scene-${index}.audio`);
       const clip = path.join(work, `clip-${index}.mp4`);
       await Promise.all([download(track.imageUrl, image, 8*1024*1024), download(track.audioUrl, audio, 20*1024*1024)]);
-      const durationForScene = Number(track.durationSeconds.toFixed(3));
+      const audioDuration = await probeDuration(audio);\n      const durationForScene = Number(Math.max(track.durationSeconds, audioDuration).toFixed(3));\n      actualDurations.push(durationForScene);
       await run("ffmpeg", ["-y","-loop","1","-framerate","30","-i",image,"-i",audio,"-t",String(durationForScene),"-vf",`scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1,fps=30`,"-af",`apad,atrim=duration=${durationForScene}`,"-c:v","libx264","-preset","veryfast","-pix_fmt","yuv420p","-c:a","aac","-b:a","192k","-ar","48000","-movflags","+faststart","-shortest",clip]);
       clips.push(clip);
     }
@@ -80,11 +120,11 @@ async function render(jobId, manifest, edits = {}) {
     const rawVideo = path.join(work, "joined.mp4");
     await run("ffmpeg", ["-y","-f","concat","-safe","0","-i",list,"-c","copy",rawVideo]);
     const subtitle = path.join(work, "subtitles.srt");
-    await writeFile(subtitle, edits.subtitleSrt ?? manifest.subtitles.content, "utf8");
+    await writeFile(subtitle, edits.subtitleSrt ?? buildTimedSubtitles(tracks, actualDurations), "utf8");
     const output = path.join(finalDir, "preview.mp4");
     await run("ffmpeg", ["-y","-i",rawVideo,"-vf",`subtitles=${subtitle.replaceAll("\\","/").replaceAll(":","\\:")}`,"-c:v","libx264","-preset","veryfast","-pix_fmt","yuv420p","-c:a","copy","-movflags","+faststart",output]);
     const info = await stat(output);
-    return { jobId, status: "preview_ready", previewPath: output, byteLength: info.size, durationSeconds: duration, sceneCount: tracks.length, revision: (jobs.get(jobId)?.revision || 0) + 1 };
+    return { jobId, status: "preview_ready", previewPath: output, byteLength: info.size, durationSeconds: actualDurations.reduce((a,b)=>a+b,0), sceneCount: tracks.length, revision: (jobs.get(jobId)?.revision || 0) + 1 };
   } finally { await rm(work, { recursive: true, force: true }); }
 }
 const app = http.createServer(async (req,res) => {
