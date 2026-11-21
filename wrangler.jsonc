@@ -6,6 +6,7 @@
   "compatibility_flags": [
     "nodejs_compat"
   ],
+  "preview_urls": true,
   "vars": {
     "MCP_RESOURCE": "https://youtube-mcp-server-bharat.klassyfic.workers.dev/mcp"
   },
@@ -21,5 +22,15 @@
   "dev": {
     "port": 8788
   },
-  "previews": {}
+  "previews": {
+    "vars": {
+      "MCP_RESOURCE": "https://feature-gcp-cloud-run-renderer-youtube-mcp-server-bharat.klassyfic.workers.dev/mcp"
+    },
+    "kv_namespaces": [
+      {
+        "binding": "OAUTH_KV",
+        "id": "ee9f907619fe41238aa1b69852aa57ff"
+      }
+    ]
+  }
 }
