@@ -107,7 +107,14 @@ async function queueRenderUnlocked(jobId, manifest, edits = {}, revision = 0, is
     }
     return;
   }
-  void render(jobId, manifest, edits).then(result => persistJob(jobId, { ...result, status: "preview_ready", manifest, revision: result.revision, updatedAt: new Date().toISOString() })).catch(error => persistJob(jobId, { ...record, status: "failed", error: error instanceof Error ? error.message : "Render failed", updatedAt: new Date().toISOString() }));
+  void withJobLock(jobId, async () => {
+    try {
+      const result = await render(jobId, manifest, edits);
+      await persistJob(jobId, { ...result, status: "preview_ready", manifest, revision: result.revision, updatedAt: new Date().toISOString() });
+    } catch (error) {
+      await persistJob(jobId, { ...record, status: "failed", error: error instanceof Error ? error.message : "Render failed", updatedAt: new Date().toISOString() });
+    }
+  });
 }
 async function runRenderWorker(jobId) {
   return withJobLock(jobId, () => runRenderWorkerUnlocked(jobId));
