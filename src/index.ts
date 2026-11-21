@@ -131,12 +131,9 @@ function createServer() {
 
 const mcpHandler = createMcpHandler(createServer);
 
-export default new OAuthProvider<Env>({
+const oauthProvider = new OAuthProvider<Env>({
   apiHandler: {
-    async fetch(request: Request, env: Env, ctx: ExecutionContext) {
-      if (new URL(request.url).pathname.startsWith("/media/audio/")) {
-        return handleAudioArtifactRequest(request, env);
-      }
+    fetch(request: Request, env: Env, ctx: ExecutionContext) {
       return mcpHandler(request, env, ctx);
     },
   },
@@ -147,3 +144,13 @@ export default new OAuthProvider<Env>({
   tokenEndpoint: "/token",
   resourceMetadata: { resource: env.MCP_RESOURCE },
 });
+
+
+export default {
+  fetch(request: Request, env: Env, ctx: ExecutionContext) {
+    if (new URL(request.url).pathname.startsWith("/media/audio/")) {
+      return handleAudioArtifactRequest(request, env);
+    }
+    return oauthProvider.fetch(request, env, ctx);
+  },
+};
