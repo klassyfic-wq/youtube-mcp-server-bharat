@@ -86,7 +86,7 @@ export function registerYoutubeUploadTools(
         description: z.string().max(5000).optional(),
         tags: z.array(z.string().trim().min(1).max(100)).max(500).optional(),
         categoryId: z.string().regex(/^\d{1,3}$/).optional(),
-        privacyStatus: z.enum(["private", "unlisted", "public"]).default("private"),
+        privacyStatus: z.enum(["private", "unlisted"]).default("private"),
         contentType: z.enum(MIME_TYPES),
         totalBytes: z.number().int().positive().max(MAX_VIDEO_BYTES),
       },
