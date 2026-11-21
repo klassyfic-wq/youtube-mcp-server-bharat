@@ -116,3 +116,11 @@ This is a staged, provider-agnostic design. It must not require paid AI subscrip
 ## Initial implementation decision
 
 Do not add an R2 binding, paid AI provider, or rendering infrastructure just because it appears in this design. First verify the actual file-transfer capability of the intended AI client and the Cloudflare account current free-tier constraints. Implement the smallest secure upload path on the feature branch, then evolve toward the full workflow.
+
+## Implemented secure audio delivery (feature branch)
+
+- `create_video_audio_download_link` issues a cryptographically random, opaque bearer URL for one authenticated user's generated scene audio. The grant is scoped to the exact per-user KV artifact and expires after 10 minutes; it can be reused by the trusted renderer until expiry to support retries.
+- The Worker serves `GET /media/audio/:token` as binary audio, not Base64/MCP content. It validates the token shape, grant expiry and scope, job/scene identity, allowed audio format, and decoded byte length before returning the file.
+- Responses use private/no-store caching, `nosniff`, no-referrer, and a fixed attachment filename. Other methods are rejected. The token URL is a bearer secret and must not be logged or exposed to browsers.
+- Configure `MEDIA_BASE_URL` as the HTTPS origin/base URL of this Worker. No audio URL is issued until this is configured. No CORS access is enabled.
+- This endpoint solves binary audio retrieval only. A trusted renderer still needs to request a fresh URL, download each scene audio, and integrate it into FFmpeg. The external renderer is not yet implemented.
