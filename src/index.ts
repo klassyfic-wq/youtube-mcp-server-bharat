@@ -9,6 +9,7 @@ import { registerYoutubeUploadTools } from "./youtube-upload-tools";
 import { registerVideoWorkflowTools } from "./youtube-video-workflow-tools";
 import { registerAiVideoPlanningTools } from "./youtube-ai-planning-tools";
 import { registerVideoMediaManifestTools } from "./youtube-media-manifest-tools";
+import { registerVideoVoiceTools } from "./youtube-video-voice-tools";
 import type { Props } from "./utils";
 import { getValidGoogleAccessToken } from "./utils";
 
@@ -122,6 +123,7 @@ function createServer() {
   registerVideoWorkflowTools(server, authProps, env);
   registerAiVideoPlanningTools(server, authProps, env);
   registerVideoMediaManifestTools(server, authProps, env);
+  registerVideoVoiceTools(server, authProps, env);
   return server;
 }
 
