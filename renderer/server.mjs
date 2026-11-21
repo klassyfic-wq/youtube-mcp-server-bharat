@@ -45,7 +45,11 @@ async function queueRender(jobId, manifest, edits = {}, revision = 0) {
   if (CLOUD_RUN_JOBS_MODE) {
     try {
       const executionName = await dispatchCloudRunJob(jobId);
-      await persistJob(jobId, { ...record, executionName, updatedAt: new Date().toISOString() });
+      // The worker may start (or even finish) before :run returns. Merge the
+      // execution name into the latest persisted record rather than overwriting
+      // a worker's rendering/terminal state with the stale queued snapshot.
+      const latest = await loadJob(jobId) || record;
+      await persistJob(jobId, { ...latest, executionName, updatedAt: new Date().toISOString() });
     } catch (error) {
       await persistJob(jobId, { ...record, status: "failed", error: error instanceof Error ? error.message : "Cloud Run Job dispatch failed", updatedAt: new Date().toISOString() });
       throw error;
@@ -252,7 +256,10 @@ if (process.env.RENDER_JOB_ID) {
     try {
       const jobId = filename.slice(0, -5);
       const record = JSON.parse(await readFile(path.join(JOBS_DIR, filename), "utf8"));
-      if (record.status === "queued" || record.status === "rendering") {
+      // Cloud Run Job executions are independent of dispatcher instances.
+      // Never mark their shared records failed merely because this HTTP service
+      // restarted; the worker owns the terminal state in Jobs mode.
+      if (!CLOUD_RUN_JOBS_MODE && (record.status === "queued" || record.status === "rendering")) {
         record.status = "failed";
         record.error = "Render was interrupted by a renderer restart; submit the render again.";
         record.updatedAt = new Date().toISOString();
