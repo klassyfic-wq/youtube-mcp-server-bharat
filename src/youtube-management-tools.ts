@@ -175,4 +175,34 @@ export function registerYoutubeManagementTools(
       }
     },
   );
+
+  server.registerTool(
+    "get_channel_analytics",
+    {
+      description: "Get channel analytics for a date range, including views, watch time, average view duration, and subscriber gains/losses.",
+      inputSchema: {
+        startDate: z.string().regex(/^\\d{4}-\\d{2}-\\d{2}$/).describe("Start date in YYYY-MM-DD format"),
+        endDate: z.string().regex(/^\\d{4}-\\d{2}-\\d{2}$/).describe("End date in YYYY-MM-DD format"),
+      },
+    },
+    async ({ startDate, endDate }) => {
+      try {
+        if (startDate > endDate) throw new Error("startDate must be on or before endDate.");
+        const token = await getToken(authProps?.userId, env);
+        const params = new URLSearchParams({
+          ids: "channel==MINE",
+          startDate,
+          endDate,
+          metrics: "views,estimatedMinutesWatched,averageViewDuration,subscribersGained,subscribersLost",
+        });
+        const analytics = await youtubeRequest(
+          `https://youtubeanalytics.googleapis.com/v2/reports?${params}`,
+          token,
+        );
+        return result(analytics);
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
 }
