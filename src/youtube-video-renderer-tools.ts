@@ -1,0 +1,100 @@
+import type { McpServer } from "@modelcontextprotocol/server";
+import { z } from "zod";
+import type { Props } from "./utils.ts";
+
+type RendererEnv = Env & {
+  MEDIA_BASE_URL?: string;
+  RENDERER_API_URL?: string;
+  RENDERER_API_KEY?: string;
+};
+type Job = { jobId: string; userId: string; stage: string; artifacts: Record<string,string>; updatedAt: string };
+type Track = { sceneNumber: number; startSeconds: number; durationSeconds: number; audioArtifactRef?: string; imageArtifactRef?: string; [key: string]: unknown };
+type Manifest = { jobId: string; aspectRatio: string; voiceoverTracks: Track[]; subtitles: { format: string; content: string }; [key: string]: unknown };
+const jobKey = (u:string,j:string)=>`youtube:video-job:${u}:${j}`;
+const manifestKey = (u:string,j:string)=>`youtube:video-media-manifest:${u}:${j}`;
+const audioKey = (u:string,j:string,n:number)=>`youtube:video-audio:${u}:${j}:${n}`;
+const imageKey = (u:string,j:string,n:number)=>`youtube:video-image:${u}:${j}:${n}`;
+const previewGrantKey = (t:string)=>`youtube:video-preview-grant:${t}`;
+const audioGrantKey = (t:string)=>`youtube:audio-download-grant:${t}`;
+const imageGrantKey = (t:string)=>`youtube:image-download-grant:${t}`;
+const randomToken=()=>Array.from(crypto.getRandomValues(new Uint8Array(32)),b=>b.toString(16).padStart(2,"0")).join("");
+function response(v:unknown){return{content:[{type:"text" as const,text:JSON.stringify(v,null,2)}]};}
+function failure(e:unknown){console.error("Video renderer request failed:",e instanceof Error?e.message:"unknown error");return{content:[{type:"text" as const,text:e instanceof Error?e.message:"Video renderer request failed."}],isError:true};}
+function rendererBase(env:RendererEnv):URL{
+  if(!env.RENDERER_API_URL||!env.RENDERER_API_KEY)throw new Error("External renderer is not configured. Set RENDERER_API_URL and RENDERER_API_KEY as Worker variables/secrets.");
+  const u=new URL(env.RENDERER_API_URL);
+  if(u.protocol!=="https:"||u.username||u.password||u.search||u.hash)throw new Error("RENDERER_API_URL must be a clean HTTPS base URL.");
+  return u;
+}
+function mediaBase(env:RendererEnv):URL{
+  if(!env.MEDIA_BASE_URL)throw new Error("MEDIA_BASE_URL is not configured.");
+  const u=new URL(env.MEDIA_BASE_URL);
+  if(u.protocol!=="https:"||u.username||u.password||u.search||u.hash)throw new Error("MEDIA_BASE_URL must be a clean HTTPS URL.");
+  return u;
+}
+export async function handleVideoPreviewRequest(request:Request,env:RendererEnv):Promise<Response>{
+  const headers={"Cache-Control":"private, no-store, max-age=0","X-Content-Type-Options":"nosniff","Referrer-Policy":"no-referrer"};
+  if(request.method!=="GET")return new Response("Method not allowed",{status:405,headers:{...headers,Allow:"GET"}});
+  const m=new URL(request.url).pathname.match(/^\/media\/preview\/([a-f0-9]{64})$/);
+  if(!m)return new Response("Not found",{status:404,headers});
+  try{
+    const raw=await env.OAUTH_KV.get(previewGrantKey(m[1]));
+    if(!raw)return new Response("Preview link is invalid or expired.",{status:404,headers});
+    const grant=JSON.parse(raw) as {userId:string;jobId:string;expiresAt:number};
+    if(!grant.userId||!grant.jobId||grant.expiresAt<=Date.now())return new Response("Preview link is invalid or expired.",{status:404,headers});
+    const base=rendererBase(env);
+    const upstream=await fetch(new URL(`/preview/${grant.jobId}`,base),{headers:{Authorization:`Bearer ${env.RENDERER_API_KEY}`},signal:AbortSignal.timeout(120_000)});
+    if(!upstream.ok)return new Response("Preview is not available from the renderer.",{status:upstream.status===404?404:502,headers});
+    const contentType=upstream.headers.get("content-type");
+    if(contentType!=="video/mp4")return new Response("Renderer returned an unexpected preview type.",{status:502,headers});
+    return new Response(upstream.body,{status:200,headers:{...headers,"Content-Type":"video/mp4","Content-Disposition":`inline; filename="${grant.jobId}-preview.mp4"`,...(upstream.headers.get("content-length")?{"Content-Length":upstream.headers.get("content-length")!}:{})}});
+  }catch(e){console.error("Preview proxy failed:",e instanceof Error?e.message:"unknown error");return new Response("Unable to retrieve preview.",{status:502,headers});}
+}
+export function registerVideoRendererTools(server:McpServer,authProps:Props|undefined,env:RendererEnv){
+  server.registerTool("render_video_preview",{
+    description:"Send a complete scene manifest and short-lived private audio/image links to the configured external FFmpeg renderer. Creates a preview only; it does not upload or publish to YouTube.",
+    inputSchema:{jobId:z.string().uuid()},
+  },async({jobId})=>{
+    try{
+      const userId=authProps?.userId;if(!userId)throw new Error("Authentication required.");
+      const rawJob=await env.OAUTH_KV.get(jobKey(userId,jobId));if(!rawJob)throw new Error("Video job not found or expired.");
+      const job=JSON.parse(rawJob) as Job;if(job.userId!==userId)throw new Error("Video job does not belong to this account.");
+      if(job.stage!=="assets"&&job.stage!=="render")throw new Error("Rendering requires a job at assets or render stage.");
+      const raw=await env.OAUTH_KV.get(manifestKey(userId,jobId));if(!raw)throw new Error("Media manifest not found.");
+      const manifest=JSON.parse(raw) as Manifest;if(manifest.jobId!==jobId||!Array.isArray(manifest.voiceoverTracks)||!manifest.voiceoverTracks.length)throw new Error("Media manifest is invalid.");
+      const base=mediaBase(env);const now=Date.now();const tracks=[];
+      for(const track of manifest.voiceoverTracks){
+        if(!track.audioArtifactRef||!track.imageArtifactRef)throw new Error(`Scene ${track.sceneNumber} needs both generated voiceover and image before rendering.`);
+        const akey=audioKey(userId,jobId,track.sceneNumber), ikey=imageKey(userId,jobId,track.sceneNumber);
+        if(!await env.OAUTH_KV.get(akey)||!await env.OAUTH_KV.get(ikey))throw new Error(`Scene ${track.sceneNumber} media artifact is missing.`);
+        const at=randomToken(),it=randomToken();
+        await Promise.all([
+          env.OAUTH_KV.put(audioGrantKey(at),JSON.stringify({audioKey:akey,userId,jobId,sceneNumber:track.sceneNumber,expiresAt:now+600000}),{expirationTtl:600}),
+          env.OAUTH_KV.put(imageGrantKey(it),JSON.stringify({imageKey:ikey,userId,jobId,sceneNumber:track.sceneNumber,expiresAt:now+600000}),{expirationTtl:600}),
+        ]);
+        tracks.push({...track,audioUrl:new URL(`/media/audio/${at}`,base).toString(),imageUrl:new URL(`/media/image/${it}`,base).toString()});
+      }
+      const endpoint=rendererBase(env);const renderManifest={...manifest,voiceoverTracks:tracks};
+      const upstream=await fetch(new URL("/render",endpoint),{method:"POST",headers:{Authorization:`Bearer ${env.RENDERER_API_KEY}`,"Content-Type":"application/json"},body:JSON.stringify({jobId,manifest:renderManifest}),signal:AbortSignal.timeout(15*60*1000)});
+      if(!upstream.ok)throw new Error(`External renderer returned HTTP ${upstream.status}.`);
+      const result=await upstream.json() as Record<string,unknown>;
+      job.stage="review";job.artifacts={...job.artifacts,videoPreview:`renderer://${jobId}`};job.updatedAt=new Date().toISOString();
+      await env.OAUTH_KV.put(jobKey(userId,jobId),JSON.stringify(job),{expirationTtl:30*24*60*60});
+      return response({jobId,status:"preview_ready",rendererResult:result,note:"Preview is ready for review. YouTube upload and publishing have not been performed."});
+    }catch(e){return failure(e);}
+  });
+  server.registerTool("create_video_preview_link",{
+    description:"Issue a short-lived private preview URL for the rendered MP4. Treat the URL as a bearer secret.",
+    inputSchema:{jobId:z.string().uuid()},
+  },async({jobId})=>{
+    try{
+      const userId=authProps?.userId;if(!userId)throw new Error("Authentication required.");
+      const raw=await env.OAUTH_KV.get(jobKey(userId,jobId));if(!raw)throw new Error("Video job not found or expired.");
+      const job=JSON.parse(raw) as Job;if(job.userId!==userId||job.stage!=="review")throw new Error("A rendered preview for this account was not found.");
+      const base=mediaBase(env);rendererBase(env);
+      const token=randomToken(),expiresAt=Date.now()+10*60*1000;
+      await env.OAUTH_KV.put(previewGrantKey(token),JSON.stringify({userId,jobId,expiresAt}),{expirationTtl:600});
+      return response({jobId,url:new URL(`/media/preview/${token}`,base).toString(),expiresAt:new Date(expiresAt).toISOString(),expiresInSeconds:600,note:"Private preview link; no YouTube upload or publication has occurred."});
+    }catch(e){return failure(e);}
+  });
+}
