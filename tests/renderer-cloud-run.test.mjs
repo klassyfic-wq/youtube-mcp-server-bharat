@@ -39,3 +39,11 @@ test("dispatch response merges execution metadata without overwriting worker pro
   assert.match(source, /const latest = await loadJob\(jobId\) \|\| record/);
   assert.match(source, /\{ \.\.\.latest, executionName, updatedAt:/);
 });
+
+test("Cloud Run status polling reconciles terminal executions missing a worker result", async () => {
+  const source = await readFile("renderer/server.mjs", "utf8");
+  assert.match(source, /async function reconcileCloudRunExecution/);
+  assert.match(source, /execution\.completionTime/);
+  assert.match(source, /renderer did not persist a preview result/);
+  assert.match(source, /reconcileCloudRunExecution\(statusMatch\[1\], record\)/);
+});
