@@ -96,12 +96,6 @@ resource "google_project_iam_member" "vertex_user" {
   member  = "serviceAccount:${google_service_account.renderer.email}"
 }
 
-resource "google_project_iam_member" "tts_user" {
-  project = var.project_id
-  role    = "roles/cloudtts.user"
-  member  = "serviceAccount:${google_service_account.renderer.email}"
-}
-
 resource "google_project_iam_member" "service_usage" {
   project = var.project_id
   role    = "roles/serviceusage.serviceUsageConsumer"
@@ -290,7 +284,6 @@ resource "google_cloud_run_v2_service" "renderer" {
     google_secret_manager_secret_iam_member.renderer_secret_access,
     google_storage_bucket_iam_member.renderer_storage,
     google_project_iam_member.vertex_user,
-    google_project_iam_member.tts_user,
     google_project_iam_member.service_usage,
     google_project_iam_member.renderer_job_dispatcher
   ]
