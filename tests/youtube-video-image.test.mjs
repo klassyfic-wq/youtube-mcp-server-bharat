@@ -77,6 +77,38 @@ test("image adapter rejects non-image payloads and cross-user jobs", async () =>
   assert.equal(denied.isError, true);
 });
 
+test("shared renderer ignores a stale dedicated image key and surfaces safe auth diagnostics", async () => {
+  const originalFetch = globalThis.fetch;
+  const kv = fakeKv(); seed(kv); const server = fakeServer();
+  registerVideoImageTools(server, auth, {
+    OAUTH_KV: kv,
+    TTS_API_URL: "https://renderer.example.test/v1/audio/speech",
+    TTS_API_KEY: "current-renderer-secret",
+    IMAGE_API_KEY: "stale-image-secret",
+  });
+  let authorization;
+  globalThis.fetch = async (_url, init) => {
+    authorization = new Headers(init.headers).get("Authorization");
+    return new Response(JSON.stringify({
+      error: "Unauthorized",
+      requestId: "safe-request-id",
+      authDiagnostics: {
+        secretConfigured: true,
+        authorizationHeaderPresent: true,
+        bearerPrefixPresent: true,
+        tokenMatchesConfiguredSecret: false,
+      },
+    }), { status: 401, headers: { "content-type": "application/json" } });
+  };
+  try {
+    const result = await server.handlers.get("generate_video_scene_image")({ jobId, sceneNumber: 1 });
+    assert.equal(authorization, "Bearer current-renderer-secret");
+    assert.match(result.content[0].text, /tokenMatchesConfiguredSecret=false/);
+    assert.match(result.content[0].text, /requestId=safe-request-id/);
+    assert.equal(kv.values.has(`youtube:video-image:${userId}:${jobId}:1`), false);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
 test("image adapter reuses the configured shared renderer endpoint and TTS secret", async () => {
   const originalFetch = globalThis.fetch;
   const kv = fakeKv(); seed(kv); const server = fakeServer();
