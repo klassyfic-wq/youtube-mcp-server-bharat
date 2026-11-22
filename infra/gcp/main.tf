@@ -213,10 +213,6 @@ resource "google_cloud_run_v2_service" "renderer" {
         }
       }
       env {
-        name  = "PORT"
-        value = "8787"
-      }
-      env {
         name  = "RENDERER_DATA_DIR"
         value = "/data"
       }
@@ -233,7 +229,7 @@ resource "google_cloud_run_v2_service" "renderer" {
         value = var.region
       }
       env {
-        name  = "CLOUD_RUN_JOB"
+        name  = "RENDERER_JOB_NAME"
         value = google_cloud_run_v2_job.renderer.name
       }
       env {

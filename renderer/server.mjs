@@ -15,7 +15,7 @@ const jobLocks = new Map();
 const JOBS_DIR = path.join(DATA_DIR, "jobs");
 const CLOUD_RUN_PROJECT = process.env.CLOUD_RUN_PROJECT;
 const CLOUD_RUN_LOCATION = process.env.CLOUD_RUN_LOCATION;
-const CLOUD_RUN_JOB = process.env.CLOUD_RUN_JOB;
+const RENDERER_JOB_NAME = process.env.RENDERER_JOB_NAME;
 const CLOUD_RUN_JOBS_MODE = process.env.RENDER_EXECUTION_MODE === "cloud-run-jobs";
 
 async function googleAccessToken() {
@@ -28,9 +28,9 @@ async function googleAccessToken() {
   return data.access_token;
 }
 async function dispatchCloudRunJob(jobId) {
-  if (!CLOUD_RUN_PROJECT || !CLOUD_RUN_LOCATION || !CLOUD_RUN_JOB) throw new Error("Cloud Run Jobs mode requires CLOUD_RUN_PROJECT, CLOUD_RUN_LOCATION, and CLOUD_RUN_JOB.");
+  if (!CLOUD_RUN_PROJECT || !CLOUD_RUN_LOCATION || !RENDERER_JOB_NAME) throw new Error("Cloud Run Jobs mode requires CLOUD_RUN_PROJECT, CLOUD_RUN_LOCATION, and RENDERER_JOB_NAME.");
   const token = await googleAccessToken();
-  const endpoint = `https://run.googleapis.com/v2/projects/${encodeURIComponent(CLOUD_RUN_PROJECT)}/locations/${encodeURIComponent(CLOUD_RUN_LOCATION)}/jobs/${encodeURIComponent(CLOUD_RUN_JOB)}:run`;
+  const endpoint = `https://run.googleapis.com/v2/projects/${encodeURIComponent(CLOUD_RUN_PROJECT)}/locations/${encodeURIComponent(CLOUD_RUN_LOCATION)}/jobs/${encodeURIComponent(RENDERER_JOB_NAME)}:run`;
   const response = await fetch(endpoint, {
     method: "POST",
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
@@ -377,7 +377,7 @@ if (process.env.RENDER_JOB_ID) {
   try { await runRenderWorker(process.env.RENDER_JOB_ID); }
   catch (error) { process.stderr.write(`render worker failed: ${error instanceof Error ? error.message : "unknown error"}\n`); process.exitCode = 1; }
 } else {
-  if (CLOUD_RUN_JOBS_MODE && (!CLOUD_RUN_PROJECT || !CLOUD_RUN_LOCATION || !CLOUD_RUN_JOB)) throw new Error("Cloud Run Jobs mode requires CLOUD_RUN_PROJECT, CLOUD_RUN_LOCATION, and CLOUD_RUN_JOB.");
+  if (CLOUD_RUN_JOBS_MODE && (!CLOUD_RUN_PROJECT || !CLOUD_RUN_LOCATION || !RENDERER_JOB_NAME)) throw new Error("Cloud Run Jobs mode requires CLOUD_RUN_PROJECT, CLOUD_RUN_LOCATION, and RENDERER_JOB_NAME.");
   for (const filename of await readdir(JOBS_DIR)) {
     if (!filename.endsWith(".json")) continue;
     try {
