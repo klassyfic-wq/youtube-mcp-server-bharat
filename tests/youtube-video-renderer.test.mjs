@@ -8,7 +8,7 @@ function parse(r){return JSON.parse(r.content[0].text);}
 const userId="render-user",jobId="6a7e8d3f-3a12-4b7d-8f41-5e4a2d9c0b11";
 function seed(kv){
   kv.values.set(`youtube:video-job:${userId}:${jobId}`,JSON.stringify({jobId,userId,stage:"assets",artifacts:{},updatedAt:new Date().toISOString()}));
-  kv.values.set(`youtube:video-media-manifest:${userId}:${jobId}`,JSON.stringify({jobId,aspectRatio:"16:9",voiceoverTracks:[{sceneNumber:1,startSeconds:0,durationSeconds:8,audioArtifactRef:"kv://audio",imageArtifactRef:"kv://image"}],subtitles:{format:"srt",content:"1\n00:00:00,000 --> 00:00:08,000\nनमस्कार\n"}}));
+  kv.values.set(`youtube:video-media-manifest:${userId}:${jobId}`,JSON.stringify({jobId,aspectRatio:"16:9",voiceoverTracks:[{sceneNumber:1,startSeconds:0,durationSeconds:8,narrationText:"नमस्कार",audioArtifactRef:"kv://audio",imageArtifactRef:"kv://image"}],subtitles:{format:"srt",content:"1\n00:00:00,000 --> 00:00:08,000\nनमस्कार\n"}}));
   kv.values.set(`youtube:video-audio:${userId}:${jobId}:1`,"audio");
   kv.values.set(`youtube:video-image:${userId}:${jobId}:1`,"image");
 }
