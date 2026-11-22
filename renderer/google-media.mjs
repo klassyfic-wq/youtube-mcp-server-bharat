@@ -1,8 +1,18 @@
 const MAX_IMAGE_BYTES = 6 * 1024 * 1024;
 const MAX_AUDIO_BYTES = 18 * 1024 * 1024;
 
-function safeJson(response, label) {
-  if (!response.ok) throw new Error(`${label} returned HTTP ${response.status}.`);
+async function safeJson(response, label) {
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    const providerError = payload?.error ?? {};
+    const detail = [providerError.status, providerError.message ?? payload?.message]
+      .filter(value => typeof value === "string" && value.length)
+      .join(": ")
+      .replace(/[\\r\\n\\t]+/g, " ")
+      .replace(/Bearer\\s+[^\\s,;]+/gi, "Bearer [REDACTED]")
+      .slice(0, 500);
+    throw new Error(label + " returned HTTP " + response.status + (detail ? " (" + detail + ")." : "."));
+  }
   return response.json();
 }
 
