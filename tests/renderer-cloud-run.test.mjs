@@ -134,5 +134,5 @@ test("renderer logs secret-safe authentication diagnostics for rejected requests
   assert.match(source, /bearerPrefixPresent:/);
   assert.match(source, /tokenMatchesConfiguredSecret:/);
   assert.match(source, /auth rejected:.*JSON\.stringify\(authDiagnostic\(req\)\)/);
-  assert.doesNotMatch(source, /authorization:\\s*authorization/);
+  assert.doesNotMatch(source, /authorization:\s*authorization/);
 });
