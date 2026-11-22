@@ -8,6 +8,7 @@
   ],
   "vars": {
     "MCP_RESOURCE": "https://youtube-mcp-server-bharat.klassyfic.workers.dev/mcp",
+    "MEDIA_BASE_URL": "https://youtube-mcp-server-bharat.klassyfic.workers.dev",
     "TTS_API_URL": "https://klassyfic-video-renderer-z4mltyuxlq-el.a.run.app/v1/audio/speech",
     "TTS_MODEL": "google-cloud-tts",
     "TTS_VOICE": "mr-IN-Chirp3-HD-Achird"
