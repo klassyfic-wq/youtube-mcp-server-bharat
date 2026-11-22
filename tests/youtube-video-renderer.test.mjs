@@ -86,3 +86,26 @@ test("renderer tool can queue a single-scene preview from a multi-scene manifest
     assert.match(missing.content[0].text, /does not exist/);
   } finally { globalThis.fetch = originalFetch; }
 });
+
+
+test("renderer reuses the existing TTS endpoint and shared bearer secret", async () => {
+  const kv = fakeKv(); seed(kv); const server = fakeServer();
+  registerVideoRendererTools(server, auth, {
+    OAUTH_KV: kv,
+    MEDIA_BASE_URL: "https://worker.example.test",
+    TTS_API_URL: "https://renderer.example.test/v1/audio/speech",
+    TTS_API_KEY: "shared-renderer-secret",
+  });
+  const originalFetch = globalThis.fetch; let target;
+  globalThis.fetch = async (url, init) => {
+    target = new URL(url);
+    assert.equal(new Headers(init.headers).get("Authorization"), "Bearer shared-renderer-secret");
+    return new Response(JSON.stringify({ jobId, status: "queued" }), { status: 202 });
+  };
+  try {
+    const queued = parse(await server.handlers.get("render_video_preview")({ jobId, sceneNumber: 1 }));
+    assert.equal(queued.status, "queued");
+    assert.equal(target.origin, "https://renderer.example.test");
+    assert.equal(target.pathname, "/render");
+  } finally { globalThis.fetch = originalFetch; }
+});
