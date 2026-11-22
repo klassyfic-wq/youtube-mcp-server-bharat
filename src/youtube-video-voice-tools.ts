@@ -109,11 +109,13 @@ export function registerVideoVoiceTools(server: McpServer, authProps: Props | un
 
         const endpoint = configuredEndpoint(env);
         const format = track.ttsRequest.outputFormat;
+        const requestId = crypto.randomUUID();
         const ttsResponse = await fetch(endpoint, {
           method: "POST",
           headers: {
             Authorization: `Bearer ${env.TTS_API_KEY}`,
             "Content-Type": "application/json",
+            "x-request-id": requestId,
             Accept: format === "mp3" ? "audio/mpeg" : format === "wav" ? "audio/wav" : "audio/ogg",
           },
           body: JSON.stringify({
@@ -126,7 +128,10 @@ export function registerVideoVoiceTools(server: McpServer, authProps: Props | un
           signal: AbortSignal.timeout(120_000),
         });
         if (!ttsResponse.ok) {
-          throw new Error(`Configured TTS provider returned HTTP ${ttsResponse.status}. Check provider configuration and quota.`);
+          const errorBody = await ttsResponse.json().catch(() => ({})) as { error?: unknown };
+          const rendererError = typeof errorBody.error === "string" ? errorBody.error.slice(0, 120) : "non-JSON error response";
+          console.error(JSON.stringify({ event: "tts_upstream_rejected", requestId, status: ttsResponse.status, rendererError }));
+          throw new Error(`Renderer returned HTTP ${ttsResponse.status}: ${rendererError}. requestId=${requestId}`);
         }
         const contentType = (ttsResponse.headers.get("content-type") ?? "").toLowerCase();
         const allowedTypes = format === "mp3"
