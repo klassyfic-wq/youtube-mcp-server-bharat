@@ -124,3 +124,15 @@ test("Cloud Run dispatcher service avoids platform-reserved environment variable
   assert.doesNotMatch(service, /name\s*=\s*"CLOUD_RUN_JOB"/);
   assert.match(service, /name\s*=\s*"RENDERER_JOB_NAME"/);
 });
+
+
+test("renderer logs secret-safe authentication diagnostics for rejected requests", async () => {
+  const source = await readFile("renderer/server.mjs", "utf8");
+  assert.match(source, /function authDiagnostic\(req\)/);
+  assert.match(source, /secretConfigured: Boolean\(SECRET\)/);
+  assert.match(source, /authorizationHeaderPresent:/);
+  assert.match(source, /bearerPrefixPresent:/);
+  assert.match(source, /tokenMatchesConfiguredSecret:/);
+  assert.match(source, /auth rejected:.*JSON\.stringify\(authDiagnostic\(req\)\)/);
+  assert.doesNotMatch(source, /authorization:\s*authorization/);
+});
