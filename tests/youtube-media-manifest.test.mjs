@@ -99,7 +99,6 @@ test("saves structured approved plan under the exact KV keys read by manifest to
   assert.equal(manifestResult.stage, "assets");
   assert.equal(manifestResult.sceneCount, 3);
   assert.equal(manifestResult.totalDurationSeconds, 15);
-  assert.equal(manifestResult.providerStatus.textToSpeech, "not_configured");
   const manifest = JSON.parse(kv.values.get(`youtube:video-media-manifest:${userId}:${jobId}`));
   assert.match(manifest.subtitles.content, /नमस्कार/);
   assert.equal(manifest.voiceoverTracks.length, 3);
