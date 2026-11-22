@@ -187,6 +187,20 @@ function auth(req) {
   if (!SECRET) return false;
   return req.headers.authorization === `Bearer ${SECRET}`;
 }
+function authDiagnostic(req) {
+  const authorization = req.headers.authorization;
+  const hasBearerPrefix = typeof authorization === "string" && authorization.startsWith("Bearer ");
+  const suppliedToken = hasBearerPrefix ? authorization.slice(7) : null;
+  return {
+    event: "renderer_auth_rejected",
+    method: req.method,
+    path: new URL(req.url, `http://${req.headers.host}`).pathname,
+    secretConfigured: Boolean(SECRET),
+    authorizationHeaderPresent: typeof authorization === "string" && authorization.length > 0,
+    bearerPrefixPresent: hasBearerPrefix,
+    tokenMatchesConfiguredSecret: Boolean(SECRET && suppliedToken !== null && suppliedToken === SECRET)
+  };
+}
 async function body(req, max = 2 * 1024 * 1024) {
   const chunks = []; let size = 0;
   for await (const chunk of req) { size += chunk.length; if (size > max) throw new Error("Request body too large."); chunks.push(chunk); }
@@ -306,7 +320,10 @@ async function render(jobId, manifest, edits = {}) {
 }
 const app = http.createServer(async (req,res) => {
   try {
-    if (!auth(req)) return send(res, 401, { error: "Unauthorized" });
+    if (!auth(req)) {
+      process.stderr.write(`auth rejected: ${JSON.stringify(authDiagnostic(req))}\\n`);
+      return send(res, 401, { error: "Unauthorized" });
+    }
     const url = new URL(req.url, `http://${req.headers.host}`);
     if (req.method === "GET" && url.pathname === "/health") return send(res, 200, { status: "ok", ffmpeg: "required-at-runtime", executionMode: CLOUD_RUN_JOBS_MODE ? "cloud-run-jobs" : "local" });
     if (req.method === "POST" && url.pathname === "/v1/images/generations") {
