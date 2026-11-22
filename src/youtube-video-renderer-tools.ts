@@ -18,6 +18,7 @@ const previewGrantKey = (t:string)=>`youtube:video-preview-grant:${t}`;
 const audioGrantKey = (t:string)=>`youtube:audio-download-grant:${t}`;
 const imageGrantKey = (t:string)=>`youtube:image-download-grant:${t}`;
 const randomToken=()=>Array.from(crypto.getRandomValues(new Uint8Array(32)),b=>b.toString(16).padStart(2,"0")).join("");
+function formatSrtTime(seconds:number){const ms=Math.max(0,Math.round(seconds*1000));const h=Math.floor(ms/3600000),m=Math.floor(ms%3600000/60000),s=Math.floor(ms%60000/1000),milli=ms%1000;return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")},${String(milli).padStart(3,"0")}`;}
 function response(v:unknown){return{content:[{type:"text" as const,text:JSON.stringify(v,null,2)}]};}
 function failure(e:unknown){console.error("Video renderer request failed:",e instanceof Error?e.message:"unknown error");return{content:[{type:"text" as const,text:e instanceof Error?e.message:"Video renderer request failed."}],isError:true};}
 function rendererBase(env:RendererEnv):URL{
@@ -82,7 +83,7 @@ export function registerVideoRendererTools(server:McpServer,authProps:Props|unde
       const renderManifest={
         ...manifest,
         voiceoverTracks:tracks,
-        ...(sceneNumber === undefined ? {} : { subtitles: { format: "srt", content: `1\\n00:00:00,000 --> ${formatSrtTime(selectedTrack.durationSeconds)}\\n${String(selectedTrack.narrationText ?? "").trim()}\\n` } }),
+        ...(sceneNumber === undefined ? {} : { subtitles: { format: "srt", content: `1\n00:00:00,000 --> ${formatSrtTime(selectedTrack.durationSeconds)}\n${String(selectedTrack.narrationText ?? "").trim()}\n` } }),
       };
       const upstream=await fetch(new URL("/render",endpoint),{method:"POST",headers:{Authorization:`Bearer ${env.RENDERER_API_KEY}`,"Content-Type":"application/json"},body:JSON.stringify({jobId,manifest:renderManifest}),signal:AbortSignal.timeout(30_000)});
       if(upstream.status!==202)throw new Error(`External renderer returned HTTP ${upstream.status}.`);
