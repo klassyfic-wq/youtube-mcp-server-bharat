@@ -20,6 +20,13 @@ test("Vertex image adapter sends bounded prompt and returns validated PNG", asyn
   assert.equal(result.base64, png);
 });
 
+test("Vertex image adapter retains a bounded provider 400 message", async () => {
+  await assert.rejects(() => generateVertexImage({
+    projectId: "p", prompt: "x", accessToken: "t",
+    fetchImpl: async () => new Response(JSON.stringify({ error: { status: "INVALID_ARGUMENT", message: "Invalid imageConfig aspectRatio." } }), { status: 400 }),
+  }), /HTTP 400 .*INVALID_ARGUMENT.*Invalid imageConfig aspectRatio/);
+});
+
 test("Vertex image adapter rejects unsupported ratios and malformed output", async () => {
   await assert.rejects(() => generateVertexImage({ projectId: "p", prompt: "x", aspectRatio: "4:3", accessToken: "t" }), /Unsupported image aspect ratio/);
   await assert.rejects(() => generateVertexImage({
