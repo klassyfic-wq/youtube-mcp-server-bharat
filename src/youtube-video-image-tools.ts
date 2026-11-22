@@ -20,9 +20,12 @@ function failure(error: unknown) {
   console.error("Video image generation failed:", error instanceof Error ? error.message : "unknown error");
   return { content: [{ type: "text" as const, text: error instanceof Error ? error.message : "Video image generation failed." }], isError: true };
 }
-function configuredEndpoint(env: ImageEnv): URL {
+function configuredEndpoint(env: ImageEnv): { endpoint: URL; apiKey: string; model: string } {
+  const usesDedicatedImageEndpoint = Boolean(env.IMAGE_API_URL);
   const imageApiUrl = env.IMAGE_API_URL ?? env.TTS_API_URL?.replace(/\/v1\/audio\/speech\/?$/, "/v1/images/generations");
-  const imageApiKey = env.IMAGE_API_KEY ?? env.TTS_API_KEY;
+  // The shared Cloud Run renderer must always use its TTS shared secret.
+  // An old IMAGE_API_KEY secret must not silently override that credential.
+  const imageApiKey = usesDedicatedImageEndpoint ? (env.IMAGE_API_KEY ?? env.TTS_API_KEY) : env.TTS_API_KEY;
   const imageModel = env.IMAGE_MODEL ?? "gemini-2.5-flash-image";
   if (!imageApiUrl || !imageApiKey || !imageModel) {
     throw new Error("Image provider is not configured. Set IMAGE_API_URL/IMAGE_API_KEY/IMAGE_MODEL or configure the shared renderer TTS endpoint and key. No provider has been called.");
@@ -32,7 +35,7 @@ function configuredEndpoint(env: ImageEnv): URL {
   if (endpoint.protocol !== "https:" || endpoint.username || endpoint.password || endpoint.hash) {
     throw new Error("IMAGE_API_URL must use HTTPS and must not contain embedded credentials or a fragment.");
   }
-  return endpoint;
+  return { endpoint, apiKey: imageApiKey, model: imageModel };
 }
 function encodeBase64(bytes: Uint8Array): string {
   let binary = "";
@@ -100,14 +103,30 @@ export function registerVideoImageTools(server: McpServer, authProps: Props | un
       if (manifest.jobId !== jobId || !Array.isArray(manifest.voiceoverTracks)) throw new Error("Media manifest failed validation.");
       const track = manifest.voiceoverTracks.find(item => item.sceneNumber === sceneNumber);
       if (!track?.visualRequest?.prompt) throw new Error("Scene visual request does not exist in the media manifest.");
-      const endpoint = configuredEndpoint(env);
-      const providerResponse = await fetch(endpoint, {
+      const provider = configuredEndpoint(env);
+      const providerResponse = await fetch(provider.endpoint, {
         method: "POST",
-        headers: { Authorization: `Bearer ${env.IMAGE_API_KEY ?? env.TTS_API_KEY}`, "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({ model: env.IMAGE_MODEL ?? "gemini-2.5-flash-image", prompt: promptOverride ?? track.visualRequest.prompt, n: 1, size: track.visualRequest.aspectRatio === "9:16" ? "1024x1792" : track.visualRequest.aspectRatio === "1:1" ? "1024x1024" : "1792x1024", response_format: "b64_json" }),
+        headers: { Authorization: `Bearer ${provider.apiKey}`, "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ model: provider.model, prompt: promptOverride ?? track.visualRequest.prompt, n: 1, size: track.visualRequest.aspectRatio === "9:16" ? "1024x1792" : track.visualRequest.aspectRatio === "1:1" ? "1024x1024" : "1792x1024", response_format: "b64_json" }),
         signal: AbortSignal.timeout(120_000),
       });
-      if (!providerResponse.ok) throw new Error(`Configured image provider returned HTTP ${providerResponse.status}. Check provider configuration and quota.`);
+      if (!providerResponse.ok) {
+        const errorPayload = await providerResponse.json().catch(() => ({})) as {
+          requestId?: string;
+          authDiagnostics?: { secretConfigured?: boolean; authorizationHeaderPresent?: boolean; bearerPrefixPresent?: boolean; tokenMatchesConfiguredSecret?: boolean };
+        };
+        const diagnostics = errorPayload.authDiagnostics;
+        if (providerResponse.status === 401 && diagnostics) {
+          const flags = [
+            `secretConfigured=${Boolean(diagnostics.secretConfigured)}`,
+            `authorizationHeaderPresent=${Boolean(diagnostics.authorizationHeaderPresent)}`,
+            `bearerPrefixPresent=${Boolean(diagnostics.bearerPrefixPresent)}`,
+            `tokenMatchesConfiguredSecret=${Boolean(diagnostics.tokenMatchesConfiguredSecret)}`,
+          ].join(", ");
+          throw new Error(`Renderer authentication rejected image request (HTTP 401; ${flags}; requestId=${errorPayload.requestId ?? "unavailable"}). No image was generated.`);
+        }
+        throw new Error(`Configured image provider returned HTTP ${providerResponse.status}${errorPayload.requestId ? ` (requestId=${errorPayload.requestId})` : ""}. Check provider authentication and configuration.`);
+      }
       const payload = await providerResponse.json() as { data?: Array<{ b64_json?: string }> };
       const encoded = payload.data?.[0]?.b64_json;
       if (typeof encoded !== "string" || !encoded || encoded.length > Math.ceil(MAX_IMAGE_BYTES * 4 / 3) + 8) throw new Error("Image provider must return one bounded data[0].b64_json image. URL responses are not fetched.");
