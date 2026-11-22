@@ -325,8 +325,11 @@ const app = http.createServer(async (req,res) => {
   const requestUrl = new URL(req.url, `http://${req.headers.host}`);
   try {
     if (!auth(req)) {
-      console.error(JSON.stringify({ ...authDiagnostic(req), requestId }));
-      return send(res, 401, { error: "Unauthorized", requestId });
+      const diagnostics = authDiagnostic(req);
+      console.error(JSON.stringify({ ...diagnostics, requestId }));
+      // Surface only non-secret auth booleans to the trusted Worker caller so
+      // diagnosis does not depend on Cloud Run stderr log visibility.
+      return send(res, 401, { error: "Unauthorized", requestId, authDiagnostics: diagnostics });
     }
     const url = requestUrl;
     if (req.method === "GET" && url.pathname === "/health") return send(res, 200, { status: "ok", ffmpeg: "required-at-runtime", executionMode: CLOUD_RUN_JOBS_MODE ? "cloud-run-jobs" : "local" });
