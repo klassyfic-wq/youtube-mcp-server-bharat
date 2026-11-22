@@ -55,3 +55,34 @@ test("renderer integration refuses to run when external runtime is not configure
   assert.equal(result.isError,true);
   assert.match(result.content[0].text,/External renderer is not configured/);
 });
+
+
+test("renderer tool can queue a single-scene preview from a multi-scene manifest", async () => {
+  const kv = fakeKv(); seed(kv);
+  const manifestKey = `youtube:video-media-manifest:${userId}:${jobId}`;
+  const manifest = JSON.parse(kv.values.get(manifestKey));
+  manifest.voiceoverTracks.push({ sceneNumber: 2, startSeconds: 8, durationSeconds: 5, narrationText: "दुसरे दृश्य", audioArtifactRef: "kv://audio-2", imageArtifactRef: "kv://image-2" });
+  kv.values.set(manifestKey, JSON.stringify(manifest));
+  kv.values.set(`youtube:video-audio:${userId}:${jobId}:2`, "audio-2");
+  kv.values.set(`youtube:video-image:${userId}:${jobId}:2`, "image-2");
+  const server = fakeServer(); registerVideoRendererTools(server, auth, { ...env, OAUTH_KV: kv });
+  const originalFetch = globalThis.fetch; let sent;
+  globalThis.fetch = async (url, init) => {
+    if (new URL(url).pathname === "/render") {
+      sent = JSON.parse(init.body);
+      return new Response(JSON.stringify({ jobId, status: "queued" }), { status: 202 });
+    }
+    throw new Error("Unexpected renderer path");
+  };
+  try {
+    const queued = parse(await server.handlers.get("render_video_preview")({ jobId, sceneNumber: 1 }));
+    assert.equal(queued.status, "queued");
+    assert.equal(sent.manifest.voiceoverTracks.length, 1);
+    assert.equal(sent.manifest.voiceoverTracks[0].sceneNumber, 1);
+    assert.equal(sent.manifest.voiceoverTracks[0].startSeconds, 0);
+    assert.match(sent.manifest.subtitles.content, /नमस्कार/);
+    const missing = await server.handlers.get("render_video_preview")({ jobId, sceneNumber: 9 });
+    assert.equal(missing.isError, true);
+    assert.match(missing.content[0].text, /does not exist/);
+  } finally { globalThis.fetch = originalFetch; }
+});
