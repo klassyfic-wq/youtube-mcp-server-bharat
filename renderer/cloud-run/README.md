@@ -16,7 +16,7 @@ Set these non-secret environment variables:
 - `RENDER_EXECUTION_MODE=cloud-run-jobs`
 - `CLOUD_RUN_PROJECT=<project-id>`
 - `CLOUD_RUN_LOCATION=<job-region>`
-- `CLOUD_RUN_JOB=<job-name>`
+- `RENDERER_JOB_NAME=<job-name>`
 - `RENDERER_DATA_DIR=/data`
 - `RENDERER_SHARED_SECRET` from Secret Manager
 - `ASSET_HOST_ALLOWLIST` restricted to the Worker media hostname
