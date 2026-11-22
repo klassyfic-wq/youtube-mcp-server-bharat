@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import type { Props } from "./utils.ts";
 
-type ImageEnv = Env & { IMAGE_API_URL?: string; IMAGE_API_KEY?: string; IMAGE_MODEL?: string; MEDIA_BASE_URL?: string };
+type ImageEnv = Env & { IMAGE_API_URL?: string; IMAGE_API_KEY?: string; IMAGE_MODEL?: string; MEDIA_BASE_URL?: string; TTS_API_URL?: string; TTS_API_KEY?: string };
 type StoredJob = { jobId: string; userId: string; stage: string; artifacts: Record<string, string>; updatedAt: string };
 type VisualTrack = { sceneNumber: number; visualRequest: { prompt: string; aspectRatio: string }; imageArtifactRef?: string; imageStatus?: string };
 type Manifest = { jobId: string; voiceoverTracks: VisualTrack[]; providerStatus?: Record<string, string> };
@@ -21,11 +21,14 @@ function failure(error: unknown) {
   return { content: [{ type: "text" as const, text: error instanceof Error ? error.message : "Video image generation failed." }], isError: true };
 }
 function configuredEndpoint(env: ImageEnv): URL {
-  if (!env.IMAGE_API_URL || !env.IMAGE_API_KEY || !env.IMAGE_MODEL) {
-    throw new Error("Image provider is not configured. Set IMAGE_API_URL, IMAGE_API_KEY, and IMAGE_MODEL as Worker variables/secrets. No provider has been called.");
+  const imageApiUrl = env.IMAGE_API_URL ?? env.TTS_API_URL?.replace(/\/v1\/audio\/speech\/?$/, "/v1/images/generations");
+  const imageApiKey = env.IMAGE_API_KEY ?? env.TTS_API_KEY;
+  const imageModel = env.IMAGE_MODEL ?? "gemini-2.5-flash-image";
+  if (!imageApiUrl || !imageApiKey || !imageModel) {
+    throw new Error("Image provider is not configured. Set IMAGE_API_URL/IMAGE_API_KEY/IMAGE_MODEL or configure the shared renderer TTS endpoint and key. No provider has been called.");
   }
   let endpoint: URL;
-  try { endpoint = new URL(env.IMAGE_API_URL); } catch { throw new Error("IMAGE_API_URL must be a valid HTTPS endpoint."); }
+  try { endpoint = new URL(imageApiUrl); } catch { throw new Error("IMAGE_API_URL must be a valid HTTPS endpoint."); }
   if (endpoint.protocol !== "https:" || endpoint.username || endpoint.password || endpoint.hash) {
     throw new Error("IMAGE_API_URL must use HTTPS and must not contain embedded credentials or a fragment.");
   }
@@ -100,8 +103,8 @@ export function registerVideoImageTools(server: McpServer, authProps: Props | un
       const endpoint = configuredEndpoint(env);
       const providerResponse = await fetch(endpoint, {
         method: "POST",
-        headers: { Authorization: `Bearer ${env.IMAGE_API_KEY}`, "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({ model: env.IMAGE_MODEL, prompt: promptOverride ?? track.visualRequest.prompt, n: 1, size: track.visualRequest.aspectRatio === "9:16" ? "1024x1792" : track.visualRequest.aspectRatio === "1:1" ? "1024x1024" : "1792x1024", response_format: "b64_json" }),
+        headers: { Authorization: `Bearer ${env.IMAGE_API_KEY ?? env.TTS_API_KEY}`, "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ model: env.IMAGE_MODEL ?? "gemini-2.5-flash-image", prompt: promptOverride ?? track.visualRequest.prompt, n: 1, size: track.visualRequest.aspectRatio === "9:16" ? "1024x1792" : track.visualRequest.aspectRatio === "1:1" ? "1024x1024" : "1792x1024", response_format: "b64_json" }),
         signal: AbortSignal.timeout(120_000),
       });
       if (!providerResponse.ok) throw new Error(`Configured image provider returned HTTP ${providerResponse.status}. Check provider configuration and quota.`);
