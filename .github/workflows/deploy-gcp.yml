@@ -142,7 +142,7 @@ jobs:
             case "$STATUS" in
               SUCCESS)
                 echo "Renderer image built and pushed successfully."
-                exit 0
+                break
                 ;;
               FAILURE|INTERNAL_ERROR|TIMEOUT|CANCELLED|EXPIRED)
                 echo "::error::Cloud Build $BUILD_ID finished with status $STATUS."
@@ -158,14 +158,23 @@ jobs:
             esac
           done
 
-          echo "::error::Timed out waiting for Cloud Build $BUILD_ID after 40 minutes."
-          exit 1
+          if [[ "$STATUS" != "SUCCESS" ]]; then
+            echo "::error::Timed out waiting for Cloud Build $BUILD_ID after 40 minutes (last status: $STATUS)."
+            exit 1
+          fi
 
       - name: Apply complete GCP infrastructure
         working-directory: infra/gcp
         run: |
           set -euo pipefail
-          IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/klassyfic-media/renderer:latest"
+          TAGGED_IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/klassyfic-media/renderer:latest"
+          DIGEST="$(gcloud artifacts docker images describe "$TAGGED_IMAGE" --project="$PROJECT_ID" --format='value(image_summary.digest)')"
+          if [[ ! "$DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+            echo "::error::Could not resolve a valid renderer image digest: $DIGEST"
+            exit 1
+          fi
+          IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/klassyfic-media/renderer@$DIGEST"
+          echo "Deploying immutable renderer image: $IMAGE"
           terraform apply -input=false -auto-approve \
             -var="project_id=$PROJECT_ID" \
             -var="region=$REGION" \
