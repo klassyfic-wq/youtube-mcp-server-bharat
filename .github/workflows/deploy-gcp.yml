@@ -121,10 +121,44 @@ jobs:
           fi
 
       - name: Build and push renderer image
+        shell: bash
         run: |
           set -euo pipefail
           IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/klassyfic-media/renderer:latest"
-          gcloud builds submit --project="$PROJECT_ID" --tag="$IMAGE" --suppress-logs renderer/
+
+          # Submit asynchronously; poll build metadata instead of streaming logs.
+          BUILD_ID="$(gcloud builds submit --async --quiet --format='value(id)' --project="$PROJECT_ID" --tag="$IMAGE" renderer/)"
+          if [[ -z "$BUILD_ID" ]]; then
+            echo "::error::Cloud Build submission returned no build ID."
+            exit 1
+          fi
+          echo "Cloud Build submitted: $BUILD_ID"
+          echo "Build details: https://console.cloud.google.com/cloud-build/builds/$BUILD_ID?project=$PROJECT_ID"
+
+          for attempt in $(seq 1 240); do
+            STATUS="$(gcloud builds describe "$BUILD_ID" --project="$PROJECT_ID" --format='value(status)')"
+            echo "Cloud Build status: $STATUS (poll $attempt/240)"
+            case "$STATUS" in
+              SUCCESS)
+                echo "Renderer image built and pushed successfully."
+                exit 0
+                ;;
+              FAILURE|INTERNAL_ERROR|TIMEOUT|CANCELLED|EXPIRED)
+                echo "::error::Cloud Build $BUILD_ID finished with status $STATUS."
+                exit 1
+                ;;
+              QUEUED|WORKING|"")
+                sleep 10
+                ;;
+              *)
+                echo "::error::Unexpected Cloud Build status: $STATUS"
+                exit 1
+                ;;
+            esac
+          done
+
+          echo "::error::Timed out waiting for Cloud Build $BUILD_ID after 40 minutes."
+          exit 1
 
       - name: Apply complete GCP infrastructure
         working-directory: infra/gcp
