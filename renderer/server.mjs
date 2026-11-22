@@ -326,7 +326,7 @@ const app = http.createServer(async (req,res) => {
   try {
     if (!auth(req)) {
       const diagnostics = authDiagnostic(req);
-      console.error(JSON.stringify({ ...diagnostics, requestId }));
+      console.error(JSON.stringify({ ...authDiagnostic(req), requestId }));
       // Surface only non-secret auth booleans to the trusted Worker caller so
       // diagnosis does not depend on Cloud Run stderr log visibility.
       return send(res, 401, { error: "Unauthorized", requestId, authDiagnostics: diagnostics });
