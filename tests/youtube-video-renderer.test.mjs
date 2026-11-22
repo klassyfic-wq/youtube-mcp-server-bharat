@@ -8,7 +8,7 @@ function parse(r){return JSON.parse(r.content[0].text);}
 const userId="render-user",jobId="6a7e8d3f-3a12-4b7d-8f41-5e4a2d9c0b11";
 function seed(kv){
   kv.values.set(`youtube:video-job:${userId}:${jobId}`,JSON.stringify({jobId,userId,stage:"assets",artifacts:{},updatedAt:new Date().toISOString()}));
-  kv.values.set(`youtube:video-media-manifest:${userId}:${jobId}`,JSON.stringify({jobId,aspectRatio:"16:9",voiceoverTracks:[{sceneNumber:1,startSeconds:0,durationSeconds:8,audioArtifactRef:"kv://audio",imageArtifactRef:"kv://image"}],subtitles:{format:"srt",content:"1\n00:00:00,000 --> 00:00:08,000\nनमस्कार\n"}}));
+  kv.values.set(`youtube:video-media-manifest:${userId}:${jobId}`,JSON.stringify({jobId,aspectRatio:"16:9",voiceoverTracks:[{sceneNumber:1,startSeconds:0,durationSeconds:8,narrationText:"नमस्कार",audioArtifactRef:"kv://audio",imageArtifactRef:"kv://image"}],subtitles:{format:"srt",content:"1\n00:00:00,000 --> 00:00:08,000\nनमस्कार\n"}}));
   kv.values.set(`youtube:video-audio:${userId}:${jobId}:1`,"audio");
   kv.values.set(`youtube:video-image:${userId}:${jobId}:1`,"image");
 }
@@ -54,4 +54,58 @@ test("renderer integration refuses to run when external runtime is not configure
   const result=await server.handlers.get("render_video_preview")({jobId});
   assert.equal(result.isError,true);
   assert.match(result.content[0].text,/External renderer is not configured/);
+});
+
+
+test("renderer tool can queue a single-scene preview from a multi-scene manifest", async () => {
+  const kv = fakeKv(); seed(kv);
+  const manifestKey = `youtube:video-media-manifest:${userId}:${jobId}`;
+  const manifest = JSON.parse(kv.values.get(manifestKey));
+  manifest.voiceoverTracks.push({ sceneNumber: 2, startSeconds: 8, durationSeconds: 5, narrationText: "दुसरे दृश्य", audioArtifactRef: "kv://audio-2", imageArtifactRef: "kv://image-2" });
+  kv.values.set(manifestKey, JSON.stringify(manifest));
+  kv.values.set(`youtube:video-audio:${userId}:${jobId}:2`, "audio-2");
+  kv.values.set(`youtube:video-image:${userId}:${jobId}:2`, "image-2");
+  const server = fakeServer(); registerVideoRendererTools(server, auth, { ...env, OAUTH_KV: kv });
+  const originalFetch = globalThis.fetch; let sent;
+  globalThis.fetch = async (url, init) => {
+    if (new URL(url).pathname === "/render") {
+      sent = JSON.parse(init.body);
+      return new Response(JSON.stringify({ jobId, status: "queued" }), { status: 202 });
+    }
+    throw new Error("Unexpected renderer path");
+  };
+  try {
+    const queued = parse(await server.handlers.get("render_video_preview")({ jobId, sceneNumber: 1 }));
+    assert.equal(queued.status, "queued");
+    assert.equal(sent.manifest.voiceoverTracks.length, 1);
+    assert.equal(sent.manifest.voiceoverTracks[0].sceneNumber, 1);
+    assert.equal(sent.manifest.voiceoverTracks[0].startSeconds, 0);
+    assert.match(sent.manifest.subtitles.content, /नमस्कार/);
+    const missing = await server.handlers.get("render_video_preview")({ jobId, sceneNumber: 9 });
+    assert.equal(missing.isError, true);
+    assert.match(missing.content[0].text, /does not exist/);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+
+test("renderer reuses the existing TTS endpoint and shared bearer secret", async () => {
+  const kv = fakeKv(); seed(kv); const server = fakeServer();
+  registerVideoRendererTools(server, auth, {
+    OAUTH_KV: kv,
+    MEDIA_BASE_URL: "https://worker.example.test",
+    TTS_API_URL: "https://renderer.example.test/v1/audio/speech",
+    TTS_API_KEY: "shared-renderer-secret",
+  });
+  const originalFetch = globalThis.fetch; let target;
+  globalThis.fetch = async (url, init) => {
+    target = new URL(url);
+    assert.equal(new Headers(init.headers).get("Authorization"), "Bearer shared-renderer-secret");
+    return new Response(JSON.stringify({ jobId, status: "queued" }), { status: 202 });
+  };
+  try {
+    const queued = parse(await server.handlers.get("render_video_preview")({ jobId, sceneNumber: 1 }));
+    assert.equal(queued.status, "queued");
+    assert.equal(target.origin, "https://renderer.example.test");
+    assert.equal(target.pathname, "/render");
+  } finally { globalThis.fetch = originalFetch; }
 });

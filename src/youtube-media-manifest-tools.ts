@@ -17,6 +17,8 @@ const jobKey = (userId: string, jobId: string) => `youtube:video-job:${userId}:$
 const scriptKey = (userId: string, jobId: string) => `youtube:video-script:${userId}:${jobId}`;
 const scenesKey = (userId: string, jobId: string) => `youtube:video-scenes:${userId}:${jobId}`;
 const manifestKey = (userId: string, jobId: string) => `youtube:video-media-manifest:${userId}:${jobId}`;
+const audioKey = (userId: string, jobId: string, sceneNumber: number) => `youtube:video-audio:${userId}:${jobId}:${sceneNumber}`;
+const imageKey = (userId: string, jobId: string, sceneNumber: number) => `youtube:video-image:${userId}:${jobId}:${sceneNumber}`;
 
 const ScriptSchema = z.object({
   title: z.string().min(1),
@@ -154,6 +156,9 @@ export function registerVideoMediaManifestTools(server: McpServer, authProps: Pr
         const totalSeconds = scenePlan.scenes.reduce((sum, scene) => sum + scene.durationSeconds, 0);
         if (Math.abs(totalSeconds - scenePlan.totalDurationSeconds) > 1) throw new Error("Stored scene duration metadata is inconsistent.");
 
+        const previousManifestRaw = await env.OAUTH_KV.get(manifestKey(userId, jobId));
+        const previousManifest = previousManifestRaw ? JSON.parse(previousManifestRaw) as { voiceoverTracks?: Array<{ sceneNumber: number; audioArtifactRef?: string; imageArtifactRef?: string }> } : undefined;
+
         let cursor = 0;
         let cueNumber = 1;
         const cues: Array<{ start: number; end: number; text: string }> = [];
@@ -190,6 +195,20 @@ export function registerVideoMediaManifestTools(server: McpServer, authProps: Pr
             onScreenText: scene.onScreenText,
           };
         });
+        const tracksWithArtifacts = await Promise.all(voiceoverTracks.map(async (track) => {
+          const previous = previousManifest?.voiceoverTracks?.find((item) => item.sceneNumber === track.sceneNumber);
+          const audioArtifactRef = job.artifacts?.[`voiceoverScene${track.sceneNumber}`] ?? previous?.audioArtifactRef;
+          const imageArtifactRef = job.artifacts?.[`sceneImage${track.sceneNumber}`] ?? previous?.imageArtifactRef;
+          const [audioExists, imageExists] = await Promise.all([
+            env.OAUTH_KV.get(audioKey(userId, jobId, track.sceneNumber)),
+            env.OAUTH_KV.get(imageKey(userId, jobId, track.sceneNumber)),
+          ]);
+          return {
+            ...track,
+            ...(audioExists && audioArtifactRef ? { audioArtifactRef, audioStatus: "generated" } : {}),
+            ...(imageExists && imageArtifactRef ? { imageArtifactRef, imageStatus: "generated" } : {}),
+          };
+        }));
         const srt = cues.map((cue) => `${cueNumber++}\n${srtTime(cue.start)} --> ${srtTime(cue.end)}\n${cue.text}\n`).join("\n");
         const manifest = {
           schemaVersion: 1,
@@ -198,10 +217,14 @@ export function registerVideoMediaManifestTools(server: McpServer, authProps: Pr
           title: script.title,
           targetDurationSeconds: totalSeconds,
           aspectRatio: job.brief.aspectRatio,
-          voiceoverTracks,
+          voiceoverTracks: tracksWithArtifacts,
           subtitles: { format: "srt", content: srt },
           renderer: { engine: "ffmpeg", status: "not_started", requiredInputs: ["voiceover audio files", "visual assets", "subtitle.srt"] },
-          providerStatus: { textToSpeech: "not_configured", imageGeneration: "not_configured", rendering: "external_worker_required" },
+          providerStatus: {
+            textToSpeech: tracksWithArtifacts.some((track) => track.audioStatus === "generated") ? "partially_or_fully_generated" : "not_configured",
+            imageGeneration: tracksWithArtifacts.some((track) => track.imageStatus === "generated") ? "partially_or_fully_generated" : "not_configured",
+            rendering: "external_worker_required",
+          },
           createdAt: new Date().toISOString(),
         };
         const artifact = manifestKey(userId, jobId);

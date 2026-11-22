@@ -79,9 +79,11 @@ test("saves structured approved plan under the exact KV keys read by manifest to
       { sceneNumber: 3, durationSeconds: 6, narration: "आणि उपयोगी व्हिडिओ. चला, शिकूया काहीतरी नवीन!", visualPrompt: "Channel name with the tagline revealed on a clean branded background", onScreenText: "नवीन माहिती, नवा अनुभव!", transition: "fade" },
     ],
   };
+  kv.values.set(`youtube:video-audio:${userId}:${jobId}:1`, JSON.stringify({ schemaVersion: 1, jobId, sceneNumber: 1 }));
+  kv.values.set(`youtube:video-image:${userId}:${jobId}:1`, JSON.stringify({ schemaVersion: 1, jobId, sceneNumber: 1 }));
   kv.values.set(`youtube:video-job:${userId}:${jobId}`, JSON.stringify({
     jobId, userId, brief: { language: "Marathi", durationMinutes: 0.25, aspectRatio: "16:9" },
-    stage: "script", artifacts: { script: "manual:script", scenePlan: "manual:scenePlan" },
+    stage: "script", artifacts: { script: "manual:script", scenePlan: "manual:scenePlan", voiceoverScene1: `kv://youtube:video-audio:${userId}:${jobId}:1`, sceneImage1: `kv://youtube:video-image:${userId}:${jobId}:1` },
     updatedAt: "2026-11-21T19:27:39.965Z",
   }));
   registerVideoMediaManifestTools(server, { userId }, { OAUTH_KV: kv });
@@ -97,10 +99,14 @@ test("saves structured approved plan under the exact KV keys read by manifest to
   assert.equal(manifestResult.stage, "assets");
   assert.equal(manifestResult.sceneCount, 3);
   assert.equal(manifestResult.totalDurationSeconds, 15);
-  assert.equal(manifestResult.providerStatus.textToSpeech, "not_configured");
   const manifest = JSON.parse(kv.values.get(`youtube:video-media-manifest:${userId}:${jobId}`));
   assert.match(manifest.subtitles.content, /नमस्कार/);
   assert.equal(manifest.voiceoverTracks.length, 3);
+  assert.equal(manifest.voiceoverTracks[0].audioStatus, "generated");
+  assert.equal(manifest.voiceoverTracks[0].imageStatus, "generated");
+  assert.equal(manifest.voiceoverTracks[0].audioArtifactRef, `kv://youtube:video-audio:${userId}:${jobId}:1`);
+  assert.equal(manifest.providerStatus.textToSpeech, "partially_or_fully_generated");
+  assert.equal(manifest.providerStatus.imageGeneration, "partially_or_fully_generated");
   assert.equal(manifest.renderer.status, "not_started");
 });
 

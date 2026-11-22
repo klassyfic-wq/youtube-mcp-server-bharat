@@ -6,6 +6,8 @@ type RendererEnv = Env & {
   MEDIA_BASE_URL?: string;
   RENDERER_API_URL?: string;
   RENDERER_API_KEY?: string;
+  TTS_API_URL?: string;
+  TTS_API_KEY?: string;
 };
 type Job = { jobId: string; userId: string; stage: string; artifacts: Record<string,string>; updatedAt: string };
 type Track = { sceneNumber: number; startSeconds: number; durationSeconds: number; audioArtifactRef?: string; imageArtifactRef?: string; [key: string]: unknown };
@@ -18,12 +20,25 @@ const previewGrantKey = (t:string)=>`youtube:video-preview-grant:${t}`;
 const audioGrantKey = (t:string)=>`youtube:audio-download-grant:${t}`;
 const imageGrantKey = (t:string)=>`youtube:image-download-grant:${t}`;
 const randomToken=()=>Array.from(crypto.getRandomValues(new Uint8Array(32)),b=>b.toString(16).padStart(2,"0")).join("");
+function formatSrtTime(seconds:number){const ms=Math.max(0,Math.round(seconds*1000));const h=Math.floor(ms/3600000),m=Math.floor(ms%3600000/60000),s=Math.floor(ms%60000/1000),milli=ms%1000;return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")},${String(milli).padStart(3,"0")}`;}
 function response(v:unknown){return{content:[{type:"text" as const,text:JSON.stringify(v,null,2)}]};}
 function failure(e:unknown){console.error("Video renderer request failed:",e instanceof Error?e.message:"unknown error");return{content:[{type:"text" as const,text:e instanceof Error?e.message:"Video renderer request failed."}],isError:true};}
+function rendererApiKey(env:RendererEnv):string{
+  const key=env.RENDERER_API_KEY??env.TTS_API_KEY;
+  if(!key)throw new Error("External renderer is not configured. Set RENDERER_API_KEY or the shared TTS_API_KEY secret.");
+  return key;
+}
 function rendererBase(env:RendererEnv):URL{
-  if(!env.RENDERER_API_URL||!env.RENDERER_API_KEY)throw new Error("External renderer is not configured. Set RENDERER_API_URL and RENDERER_API_KEY as Worker variables/secrets.");
-  const u=new URL(env.RENDERER_API_URL);
+  let configuredUrl=env.RENDERER_API_URL;
+  if(!configuredUrl&&env.TTS_API_URL){
+    const ttsUrl=new URL(env.TTS_API_URL);
+    if(ttsUrl.protocol!=="https:"||ttsUrl.username||ttsUrl.password||ttsUrl.search||ttsUrl.hash)throw new Error("TTS_API_URL must be a clean HTTPS endpoint before it can be reused for rendering.");
+    configuredUrl=ttsUrl.origin;
+  }
+  if(!configuredUrl)throw new Error("External renderer is not configured. Set RENDERER_API_URL or the shared TTS_API_URL variable.");
+  const u=new URL(configuredUrl);
   if(u.protocol!=="https:"||u.username||u.password||u.search||u.hash)throw new Error("RENDERER_API_URL must be a clean HTTPS base URL.");
+  rendererApiKey(env);
   return u;
 }
 function mediaBase(env:RendererEnv):URL{
@@ -43,7 +58,7 @@ export async function handleVideoPreviewRequest(request:Request,env:RendererEnv)
     const grant=JSON.parse(raw) as {userId:string;jobId:string;expiresAt:number};
     if(!grant.userId||!grant.jobId||grant.expiresAt<=Date.now())return new Response("Preview link is invalid or expired.",{status:404,headers});
     const base=rendererBase(env);
-    const upstream=await fetch(new URL(`/preview/${grant.jobId}`,base),{headers:{Authorization:`Bearer ${env.RENDERER_API_KEY}`},signal:AbortSignal.timeout(120_000)});
+    const upstream=await fetch(new URL(`/preview/${grant.jobId}`,base),{headers:{Authorization:`Bearer ${rendererApiKey(env)}`},signal:AbortSignal.timeout(120_000)});
     if(!upstream.ok)return new Response("Preview is not available from the renderer.",{status:upstream.status===404?404:502,headers});
     const contentType=upstream.headers.get("content-type");
     if(contentType!=="video/mp4")return new Response("Renderer returned an unexpected preview type.",{status:502,headers});
@@ -53,8 +68,8 @@ export async function handleVideoPreviewRequest(request:Request,env:RendererEnv)
 export function registerVideoRendererTools(server:McpServer,authProps:Props|undefined,env:RendererEnv){
   server.registerTool("render_video_preview",{
     description:"Send a complete scene manifest and short-lived private audio/image links to the configured external FFmpeg renderer. Creates a preview only; it does not upload or publish to YouTube.",
-    inputSchema:{jobId:z.string().uuid()},
-  },async({jobId})=>{
+    inputSchema:{jobId:z.string().uuid(),sceneNumber:z.number().int().positive().optional()},
+  },async({jobId,sceneNumber})=>{
     try{
       const userId=authProps?.userId;if(!userId)throw new Error("Authentication required.");
       const rawJob=await env.OAUTH_KV.get(jobKey(userId,jobId));if(!rawJob)throw new Error("Video job not found or expired.");
@@ -63,7 +78,10 @@ export function registerVideoRendererTools(server:McpServer,authProps:Props|unde
       const raw=await env.OAUTH_KV.get(manifestKey(userId,jobId));if(!raw)throw new Error("Media manifest not found.");
       const manifest=JSON.parse(raw) as Manifest;if(manifest.jobId!==jobId||!Array.isArray(manifest.voiceoverTracks)||!manifest.voiceoverTracks.length)throw new Error("Media manifest is invalid.");
       const base=mediaBase(env);const now=Date.now();const tracks=[];
-      for(const track of manifest.voiceoverTracks){
+      const selectedTracks = sceneNumber === undefined ? manifest.voiceoverTracks : manifest.voiceoverTracks.filter((track) => track.sceneNumber === sceneNumber);
+      if (!selectedTracks.length) throw new Error(sceneNumber === undefined ? "Media manifest contains no scenes." : `Scene ${sceneNumber} does not exist in the media manifest.`);
+      for(const sourceTrack of selectedTracks){
+        const track = sceneNumber === undefined ? sourceTrack : { ...sourceTrack, startSeconds: 0 };
         if(!track.audioArtifactRef||!track.imageArtifactRef)throw new Error(`Scene ${track.sceneNumber} needs both generated voiceover and image before rendering.`);
         const akey=audioKey(userId,jobId,track.sceneNumber), ikey=imageKey(userId,jobId,track.sceneNumber);
         if(!await env.OAUTH_KV.get(akey)||!await env.OAUTH_KV.get(ikey))throw new Error(`Scene ${track.sceneNumber} media artifact is missing.`);
@@ -74,8 +92,14 @@ export function registerVideoRendererTools(server:McpServer,authProps:Props|unde
         ]);
         tracks.push({...track,audioUrl:new URL(`/media/audio/${at}`,base).toString(),imageUrl:new URL(`/media/image/${it}`,base).toString()});
       }
-      const endpoint=rendererBase(env);const renderManifest={...manifest,voiceoverTracks:tracks};
-      const upstream=await fetch(new URL("/render",endpoint),{method:"POST",headers:{Authorization:`Bearer ${env.RENDERER_API_KEY}`,"Content-Type":"application/json"},body:JSON.stringify({jobId,manifest:renderManifest}),signal:AbortSignal.timeout(30_000)});
+      const endpoint=rendererBase(env);
+      const selectedTrack = selectedTracks[0];
+      const renderManifest={
+        ...manifest,
+        voiceoverTracks:tracks,
+        ...(sceneNumber === undefined ? {} : { subtitles: { format: "srt", content: `1\n00:00:00,000 --> ${formatSrtTime(selectedTrack.durationSeconds)}\n${String(selectedTrack.narrationText ?? "").trim()}\n` } }),
+      };
+      const upstream=await fetch(new URL("/render",endpoint),{method:"POST",headers:{Authorization:`Bearer ${rendererApiKey(env)}`,"Content-Type":"application/json"},body:JSON.stringify({jobId,manifest:renderManifest}),signal:AbortSignal.timeout(30_000)});
       if(upstream.status!==202)throw new Error(`External renderer returned HTTP ${upstream.status}.`);
       const result=await upstream.json() as Record<string,unknown>;
       job.stage="render";job.artifacts={...job.artifacts,videoPreview:`renderer://${jobId}`};job.updatedAt=new Date().toISOString();
@@ -94,7 +118,7 @@ export function registerVideoRendererTools(server:McpServer,authProps:Props|unde
       const job=JSON.parse(raw) as Job;if(job.userId!==userId)throw new Error("Video job does not belong to this account.");
       if(job.stage!=="render"&&job.stage!=="review")throw new Error("Video job is not in the render/review stage.");
       const base=rendererBase(env);
-      const upstream=await fetch(new URL(`/jobs/${jobId}`,base),{headers:{Authorization:`Bearer ${env.RENDERER_API_KEY}`},signal:AbortSignal.timeout(30_000)});
+      const upstream=await fetch(new URL(`/jobs/${jobId}`,base),{headers:{Authorization:`Bearer ${rendererApiKey(env)}`},signal:AbortSignal.timeout(30_000)});
       if(!upstream.ok)throw new Error(`Renderer status API returned HTTP ${upstream.status}.`);
       const status=await upstream.json() as {status?:string;error?:string;previewPath?:string;byteLength?:number;durationSeconds?:number;sceneCount?:number;revision?:number};
       if(status.status==="preview_ready"){
@@ -116,7 +140,7 @@ export function registerVideoRendererTools(server:McpServer,authProps:Props|unde
       const raw=await env.OAUTH_KV.get(jobKey(userId,jobId));if(!raw)throw new Error("Video job not found or expired.");
       const job=JSON.parse(raw) as Job;if(job.userId!==userId||job.stage!=="review")throw new Error("A rendered preview for this account is required before editing.");
       const base=rendererBase(env);
-      const upstream=await fetch(new URL(`/preview/${jobId}`,base),{method:"POST",headers:{Authorization:`Bearer ${env.RENDERER_API_KEY}`,"Content-Type":"application/json"},body:JSON.stringify({edits:{subtitleSrt}}),signal:AbortSignal.timeout(30_000)});
+      const upstream=await fetch(new URL(`/preview/${jobId}`,base),{method:"POST",headers:{Authorization:`Bearer ${rendererApiKey(env)}`,"Content-Type":"application/json"},body:JSON.stringify({edits:{subtitleSrt}}),signal:AbortSignal.timeout(30_000)});
       if(upstream.status!==202)throw new Error(`Renderer edit endpoint returned HTTP ${upstream.status}.`);
       const result=await upstream.json() as Record<string,unknown>;
       job.stage="render";job.updatedAt=new Date().toISOString();

@@ -76,3 +76,22 @@ test("image adapter rejects non-image payloads and cross-user jobs", async () =>
   const denied = await other.handlers.get("generate_video_scene_image")({ jobId, sceneNumber: 1 });
   assert.equal(denied.isError, true);
 });
+
+test("image adapter reuses the configured shared renderer endpoint and TTS secret", async () => {
+  const originalFetch = globalThis.fetch;
+  const kv = fakeKv(); seed(kv); const server = fakeServer();
+  registerVideoImageTools(server, auth, { OAUTH_KV: kv, TTS_API_URL: "https://renderer.example.test/v1/audio/speech", TTS_API_KEY: "shared-test-secret" });
+  let requestedUrl, requestedBody;
+  globalThis.fetch = async (url, init) => {
+    requestedUrl = String(url);
+    assert.equal(new Headers(init.headers).get("Authorization"), "Bearer shared-test-secret");
+    requestedBody = JSON.parse(init.body);
+    return new Response(JSON.stringify({ data: [{ b64_json: pngBase64 }] }), { status: 200 });
+  };
+  try {
+    const result = parse(await server.handlers.get("generate_video_scene_image")({ jobId, sceneNumber: 1 }));
+    assert.equal(result.status, "generated");
+    assert.equal(requestedUrl, "https://renderer.example.test/v1/images/generations");
+    assert.equal(requestedBody.model, "gemini-2.5-flash-image");
+  } finally { globalThis.fetch = originalFetch; }
+});
