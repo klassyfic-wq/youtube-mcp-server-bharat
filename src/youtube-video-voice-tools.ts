@@ -128,10 +128,19 @@ export function registerVideoVoiceTools(server: McpServer, authProps: Props | un
           signal: AbortSignal.timeout(120_000),
         });
         if (!ttsResponse.ok) {
-          const errorBody = await ttsResponse.json().catch(() => ({})) as { error?: unknown };
+          const errorBody = await ttsResponse.json().catch(() => ({})) as {
+            error?: unknown;
+            authDiagnostics?: {
+              secretConfigured?: boolean;
+              authorizationHeaderPresent?: boolean;
+              bearerPrefixPresent?: boolean;
+              tokenMatchesConfiguredSecret?: boolean;
+            };
+          };
           const rendererError = typeof errorBody.error === "string" ? errorBody.error.slice(0, 120) : "non-JSON error response";
-          console.error(JSON.stringify({ event: "tts_upstream_rejected", requestId, status: ttsResponse.status, rendererError }));
-          throw new Error(`Renderer returned HTTP ${ttsResponse.status}: ${rendererError}. requestId=${requestId}`);
+          const authDiagnostics = errorBody.authDiagnostics;
+          console.error(JSON.stringify({ event: "tts_upstream_rejected", requestId, status: ttsResponse.status, rendererError, authDiagnostics }));
+          throw new Error(`Renderer returned HTTP ${ttsResponse.status}: ${rendererError}. authDiagnostics=${JSON.stringify(authDiagnostics ?? null)}. requestId=${requestId}`);
         }
         const contentType = (ttsResponse.headers.get("content-type") ?? "").toLowerCase();
         const allowedTypes = format === "mp3"
