@@ -145,6 +145,10 @@ resource "google_cloud_run_v2_job" "renderer" {
           value = var.project_id
         }
         env {
+          name  = "ASSET_HOST_ALLOWLIST"
+          value = var.worker_host
+        }
+        env {
           name  = "VERTEX_AI_LOCATION"
           value = "global"
         }
