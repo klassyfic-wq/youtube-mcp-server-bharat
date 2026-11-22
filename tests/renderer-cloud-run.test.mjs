@@ -116,3 +116,11 @@ test("renderer overlays scene on-screen text using a Devanagari-capable font", a
   assert.match(source, /scene-\$\{index\}\.overlay\.txt/);
   assert.match(docker, /fonts-noto-core/);
 });
+
+test("Cloud Run dispatcher service avoids platform-reserved environment variables", async () => {
+  const terraform = await readFile("infra/gcp/main.tf", "utf8");
+  const service = terraform.slice(terraform.indexOf('resource "google_cloud_run_v2_service" "renderer"'), terraform.indexOf('resource "google_cloud_run_v2_service_iam_member"'));
+  assert.doesNotMatch(service, /name\s*=\s*"PORT"/);
+  assert.doesNotMatch(service, /name\s*=\s*"CLOUD_RUN_JOB"/);
+  assert.match(service, /name\s*=\s*"RENDERER_JOB_NAME"/);
+});
