@@ -15,8 +15,8 @@ const jobLocks = new Map();
 const JOBS_DIR = path.join(DATA_DIR, "jobs");
 const CLOUD_RUN_PROJECT = process.env.CLOUD_RUN_PROJECT;
 const CLOUD_RUN_LOCATION = process.env.CLOUD_RUN_LOCATION;
-const CLOUD_RUN_JOB = process.env.CLOUD_RUN_JOB;
-const CLOUD_RUN_JOBS_MODE = process.env.RENDER_EXECUTION_MODE === "cloud-run-jobs";
+const RENDERER_JOB_NAME = process.env.RENDERER_JOB_NAME;
+const RENDERER_JOB_NAMES_MODE = process.env.RENDER_EXECUTION_MODE === "cloud-run-jobs";
 
 async function googleAccessToken() {
   const response = await fetch("http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token", {
@@ -28,9 +28,9 @@ async function googleAccessToken() {
   return data.access_token;
 }
 async function dispatchCloudRunJob(jobId) {
-  if (!CLOUD_RUN_PROJECT || !CLOUD_RUN_LOCATION || !CLOUD_RUN_JOB) throw new Error("Cloud Run Jobs mode requires CLOUD_RUN_PROJECT, CLOUD_RUN_LOCATION, and CLOUD_RUN_JOB.");
+  if (!CLOUD_RUN_PROJECT || !CLOUD_RUN_LOCATION || !RENDERER_JOB_NAME) throw new Error("Cloud Run Jobs mode requires CLOUD_RUN_PROJECT, CLOUD_RUN_LOCATION, and RENDERER_JOB_NAME.");
   const token = await googleAccessToken();
-  const endpoint = `https://run.googleapis.com/v2/projects/${encodeURIComponent(CLOUD_RUN_PROJECT)}/locations/${encodeURIComponent(CLOUD_RUN_LOCATION)}/jobs/${encodeURIComponent(CLOUD_RUN_JOB)}:run`;
+  const endpoint = `https://run.googleapis.com/v2/projects/${encodeURIComponent(CLOUD_RUN_PROJECT)}/locations/${encodeURIComponent(CLOUD_RUN_LOCATION)}/jobs/${encodeURIComponent(RENDERER_JOB_NAME)}:run`;
   const response = await fetch(endpoint, {
     method: "POST",
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
@@ -48,7 +48,7 @@ async function dispatchCloudRunJob(jobId) {
   return executionName;
 }
 async function reconcileCloudRunExecution(jobId, record) {
-  if (!CLOUD_RUN_JOBS_MODE || !record.executionName || !["queued", "rendering"].includes(record.status)) return record;
+  if (!RENDERER_JOB_NAMES_MODE || !record.executionName || !["queued", "rendering"].includes(record.status)) return record;
   const token = await googleAccessToken();
   const endpoint = `https://run.googleapis.com/v2/${record.executionName.split("/").map(encodeURIComponent).join("/")}`;
   const response = await fetch(endpoint, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(5000) });
@@ -98,9 +98,9 @@ async function queueRenderUnlocked(jobId, manifest, edits = {}, revision = 0, is
   } else if (existing) {
     throw new Error("A render job with this jobId already exists; use the preview edit endpoint to create a new revision.");
   }
-  const record = { status: CLOUD_RUN_JOBS_MODE ? "queued" : "rendering", manifest, edits, revision, updatedAt: new Date().toISOString() };
+  const record = { status: RENDERER_JOB_NAMES_MODE ? "queued" : "rendering", manifest, edits, revision, updatedAt: new Date().toISOString() };
   await persistJob(jobId, record);
-  if (CLOUD_RUN_JOBS_MODE) {
+  if (RENDERER_JOB_NAMES_MODE) {
     try {
       const executionName = await dispatchCloudRunJob(jobId);
       // The worker may start (or even finish) before :run returns. Merge the
@@ -308,7 +308,7 @@ const app = http.createServer(async (req,res) => {
   try {
     if (!auth(req)) return send(res, 401, { error: "Unauthorized" });
     const url = new URL(req.url, `http://${req.headers.host}`);
-    if (req.method === "GET" && url.pathname === "/health") return send(res, 200, { status: "ok", ffmpeg: "required-at-runtime", executionMode: CLOUD_RUN_JOBS_MODE ? "cloud-run-jobs" : "local" });
+    if (req.method === "GET" && url.pathname === "/health") return send(res, 200, { status: "ok", ffmpeg: "required-at-runtime", executionMode: RENDERER_JOB_NAMES_MODE ? "cloud-run-jobs" : "local" });
     if (req.method === "POST" && url.pathname === "/v1/images/generations") {
       const payload = await body(req, 64 * 1024);
       const prompt = typeof payload.prompt === "string" ? payload.prompt.trim() : "";
@@ -340,13 +340,13 @@ const app = http.createServer(async (req,res) => {
       if (typeof jobId !== "string" || !/^[0-9a-f-]{36}$/i.test(jobId)) return send(res,400,{error:"Invalid jobId"});
       validateManifest(payload.manifest);
       const queued = await queueRender(jobId, payload.manifest, payload.edits || {}, 0);
-      return send(res, 202, { jobId, status: queued?.status || "queued", dispatchOutcomeUnknown: queued?.dispatchOutcomeUnknown || false, executionMode: CLOUD_RUN_JOBS_MODE ? "cloud-run-jobs" : "local" });
+      return send(res, 202, { jobId, status: queued?.status || "queued", dispatchOutcomeUnknown: queued?.dispatchOutcomeUnknown || false, executionMode: RENDERER_JOB_NAMES_MODE ? "cloud-run-jobs" : "local" });
     }
     const statusMatch = url.pathname.match(new RegExp("^/jobs/([0-9a-f-]{36})$", "i"));
     if (req.method === "GET" && statusMatch) {
       let record = await loadJob(statusMatch[1]);
       if (!record) return send(res,404,{error:"Render job not found"});
-      if (CLOUD_RUN_JOBS_MODE && record.executionName) {
+      if (RENDERER_JOB_NAMES_MODE && record.executionName) {
         try { record = await reconcileCloudRunExecution(statusMatch[1], record); }
         catch (error) { process.stderr.write(`execution reconciliation failed for ${statusMatch[1]}: ${error instanceof Error ? error.message : "unknown error"}\n`); }
       }
@@ -366,7 +366,7 @@ const app = http.createServer(async (req,res) => {
       const record = await loadJob(match[1]);
       if (!record?.manifest) return send(res,404,{error:"Original render manifest is unavailable"});
       const queued = await queueRender(match[1], record.manifest, payload.edits || {}, 0, true);
-      return send(res,202,{jobId:match[1],status:queued?.status || "queued",dispatchOutcomeUnknown:queued?.dispatchOutcomeUnknown || false,executionMode:CLOUD_RUN_JOBS_MODE ? "cloud-run-jobs" : "local"});
+      return send(res,202,{jobId:match[1],status:queued?.status || "queued",dispatchOutcomeUnknown:queued?.dispatchOutcomeUnknown || false,executionMode:RENDERER_JOB_NAMES_MODE ? "cloud-run-jobs" : "local"});
     }
     return send(res,404,{error:"Not found"});
   } catch (error) { return send(res,400,{error:error instanceof Error ? error.message : "Render failed"}); }
@@ -377,7 +377,7 @@ if (process.env.RENDER_JOB_ID) {
   try { await runRenderWorker(process.env.RENDER_JOB_ID); }
   catch (error) { process.stderr.write(`render worker failed: ${error instanceof Error ? error.message : "unknown error"}\n`); process.exitCode = 1; }
 } else {
-  if (CLOUD_RUN_JOBS_MODE && (!CLOUD_RUN_PROJECT || !CLOUD_RUN_LOCATION || !CLOUD_RUN_JOB)) throw new Error("Cloud Run Jobs mode requires CLOUD_RUN_PROJECT, CLOUD_RUN_LOCATION, and CLOUD_RUN_JOB.");
+  if (RENDERER_JOB_NAMES_MODE && (!CLOUD_RUN_PROJECT || !CLOUD_RUN_LOCATION || !RENDERER_JOB_NAME)) throw new Error("Cloud Run Jobs mode requires CLOUD_RUN_PROJECT, CLOUD_RUN_LOCATION, and RENDERER_JOB_NAME.");
   for (const filename of await readdir(JOBS_DIR)) {
     if (!filename.endsWith(".json")) continue;
     try {
@@ -386,7 +386,7 @@ if (process.env.RENDER_JOB_ID) {
       // Cloud Run Job executions are independent of dispatcher instances.
       // Never mark their shared records failed merely because this HTTP service
       // restarted; the worker owns the terminal state in Jobs mode.
-      if (!CLOUD_RUN_JOBS_MODE && (record.status === "queued" || record.status === "rendering")) {
+      if (!RENDERER_JOB_NAMES_MODE && (record.status === "queued" || record.status === "rendering")) {
         record.status = "failed";
         record.error = "Render was interrupted by a renderer restart; submit the render again.";
         record.updatedAt = new Date().toISOString();
