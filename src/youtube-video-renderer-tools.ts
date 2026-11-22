@@ -53,8 +53,8 @@ export async function handleVideoPreviewRequest(request:Request,env:RendererEnv)
 export function registerVideoRendererTools(server:McpServer,authProps:Props|undefined,env:RendererEnv){
   server.registerTool("render_video_preview",{
     description:"Send a complete scene manifest and short-lived private audio/image links to the configured external FFmpeg renderer. Creates a preview only; it does not upload or publish to YouTube.",
-    inputSchema:{jobId:z.string().uuid()},
-  },async({jobId})=>{
+    inputSchema:{jobId:z.string().uuid(),sceneNumber:z.number().int().positive().optional()},
+  },async({jobId,sceneNumber})=>{
     try{
       const userId=authProps?.userId;if(!userId)throw new Error("Authentication required.");
       const rawJob=await env.OAUTH_KV.get(jobKey(userId,jobId));if(!rawJob)throw new Error("Video job not found or expired.");
@@ -63,7 +63,10 @@ export function registerVideoRendererTools(server:McpServer,authProps:Props|unde
       const raw=await env.OAUTH_KV.get(manifestKey(userId,jobId));if(!raw)throw new Error("Media manifest not found.");
       const manifest=JSON.parse(raw) as Manifest;if(manifest.jobId!==jobId||!Array.isArray(manifest.voiceoverTracks)||!manifest.voiceoverTracks.length)throw new Error("Media manifest is invalid.");
       const base=mediaBase(env);const now=Date.now();const tracks=[];
-      for(const track of manifest.voiceoverTracks){
+      const selectedTracks = sceneNumber === undefined ? manifest.voiceoverTracks : manifest.voiceoverTracks.filter((track) => track.sceneNumber === sceneNumber);
+      if (!selectedTracks.length) throw new Error(sceneNumber === undefined ? "Media manifest contains no scenes." : `Scene ${sceneNumber} does not exist in the media manifest.`);
+      for(const sourceTrack of selectedTracks){
+        const track = sceneNumber === undefined ? sourceTrack : { ...sourceTrack, startSeconds: 0 };
         if(!track.audioArtifactRef||!track.imageArtifactRef)throw new Error(`Scene ${track.sceneNumber} needs both generated voiceover and image before rendering.`);
         const akey=audioKey(userId,jobId,track.sceneNumber), ikey=imageKey(userId,jobId,track.sceneNumber);
         if(!await env.OAUTH_KV.get(akey)||!await env.OAUTH_KV.get(ikey))throw new Error(`Scene ${track.sceneNumber} media artifact is missing.`);
@@ -74,7 +77,13 @@ export function registerVideoRendererTools(server:McpServer,authProps:Props|unde
         ]);
         tracks.push({...track,audioUrl:new URL(`/media/audio/${at}`,base).toString(),imageUrl:new URL(`/media/image/${it}`,base).toString()});
       }
-      const endpoint=rendererBase(env);const renderManifest={...manifest,voiceoverTracks:tracks};
+      const endpoint=rendererBase(env);
+      const selectedTrack = selectedTracks[0];
+      const renderManifest={
+        ...manifest,
+        voiceoverTracks:tracks,
+        ...(sceneNumber === undefined ? {} : { subtitles: { format: "srt", content: `1\\n00:00:00,000 --> ${formatSrtTime(selectedTrack.durationSeconds)}\\n${String(selectedTrack.narrationText ?? "").trim()}\\n` } }),
+      };
       const upstream=await fetch(new URL("/render",endpoint),{method:"POST",headers:{Authorization:`Bearer ${env.RENDERER_API_KEY}`,"Content-Type":"application/json"},body:JSON.stringify({jobId,manifest:renderManifest}),signal:AbortSignal.timeout(30_000)});
       if(upstream.status!==202)throw new Error(`External renderer returned HTTP ${upstream.status}.`);
       const result=await upstream.json() as Record<string,unknown>;
