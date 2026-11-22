@@ -319,12 +319,16 @@ async function render(jobId, manifest, edits = {}) {
   } finally { await rm(work, { recursive: true, force: true }); }
 }
 const app = http.createServer(async (req,res) => {
+  const incomingRequestId = req.headers["x-request-id"];
+  const requestId = typeof incomingRequestId === "string" && /^[a-zA-Z0-9-]{1,80}$/.test(incomingRequestId) ? incomingRequestId : randomUUID();
+  res.setHeader("x-request-id", requestId);
+  const requestUrl = new URL(req.url, `http://${req.headers.host}`);
   try {
     if (!auth(req)) {
-      process.stderr.write(`auth rejected: ${JSON.stringify(authDiagnostic(req))}\\n`);
-      return send(res, 401, { error: "Unauthorized" });
+      console.error(JSON.stringify({ ...authDiagnostic(req), requestId }));
+      return send(res, 401, { error: "Unauthorized", requestId });
     }
-    const url = new URL(req.url, `http://${req.headers.host}`);
+    const url = requestUrl;
     if (req.method === "GET" && url.pathname === "/health") return send(res, 200, { status: "ok", ffmpeg: "required-at-runtime", executionMode: CLOUD_RUN_JOBS_MODE ? "cloud-run-jobs" : "local" });
     if (req.method === "POST" && url.pathname === "/v1/images/generations") {
       const payload = await body(req, 64 * 1024);
@@ -341,6 +345,7 @@ const app = http.createServer(async (req,res) => {
     }
     if (req.method === "POST" && url.pathname === "/v1/audio/speech") {
       const payload = await body(req, 64 * 1024);
+      console.info(JSON.stringify({ event: "tts_request_received", requestId, method: req.method, path: url.pathname, inputLength: typeof payload.input === "string" ? payload.input.length : 0, voice: typeof payload.voice === "string" ? payload.voice : process.env.GOOGLE_TTS_VOICE || "mr-IN-Chirp3-HD-Achird" }));
       const input = typeof payload.input === "string" ? payload.input.trim() : "";
       const voice = typeof payload.voice === "string" ? payload.voice : process.env.GOOGLE_TTS_VOICE || "mr-IN-Chirp3-HD-Achird";
       if (!input || input.length > 5000 || payload.response_format !== "mp3") return send(res, 400, { error: "Expected non-empty text (maximum 5000 characters) and response_format=mp3." });
@@ -348,7 +353,8 @@ const app = http.createServer(async (req,res) => {
       if (!projectId) return send(res, 503, { error: "Google Cloud Text-to-Speech is not configured." });
       const token = await googleAccessToken();
       const audio = await synthesizeCloudSpeech({ projectId, text: input, voiceName: voice, accessToken: token });
-      res.writeHead(200, { "content-type": "audio/mpeg", "content-length": audio.length, "cache-control": "no-store", "x-content-type-options": "nosniff" });
+      console.info(JSON.stringify({ event: "tts_request_succeeded", requestId, audioBytes: audio.length }));
+      res.writeHead(200, { "content-type": "audio/mpeg", "content-length": audio.length, "cache-control": "no-store", "x-content-type-options": "nosniff", "x-request-id": requestId });
       return res.end(audio);
     }
     if (req.method === "POST" && url.pathname === "/render") {
@@ -386,7 +392,10 @@ const app = http.createServer(async (req,res) => {
       return send(res,202,{jobId:match[1],status:queued?.status || "queued",dispatchOutcomeUnknown:queued?.dispatchOutcomeUnknown || false,executionMode:CLOUD_RUN_JOBS_MODE ? "cloud-run-jobs" : "local"});
     }
     return send(res,404,{error:"Not found"});
-  } catch (error) { return send(res,400,{error:error instanceof Error ? error.message : "Render failed"}); }
+  } catch (error) {
+    console.error(JSON.stringify({ event: "renderer_request_failed", requestId, method: req.method, path: requestUrl.pathname, error: error instanceof Error ? error.message : "unknown error" }));
+    return send(res,400,{error:error instanceof Error ? error.message : "Render failed", requestId});
+  }
 });
 await mkdir(DATA_DIR, { recursive: true });
 await mkdir(JOBS_DIR, { recursive: true });
