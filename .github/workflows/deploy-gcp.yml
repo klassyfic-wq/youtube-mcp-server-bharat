@@ -158,8 +158,10 @@ jobs:
             esac
           done
 
-          echo "::error::Timed out waiting for Cloud Build $BUILD_ID after 40 minutes."
-          exit 1
+          if [[ "$STATUS" != "SUCCESS" ]]; then
+            echo "::error::Timed out waiting for Cloud Build $BUILD_ID after 40 minutes (last status: $STATUS)."
+            exit 1
+          fi
 
       - name: Apply complete GCP infrastructure
         working-directory: infra/gcp
