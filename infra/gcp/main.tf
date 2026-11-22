@@ -32,6 +32,16 @@ resource "google_artifact_registry_repository" "renderer" {
   depends_on    = [google_project_service.apis]
 }
 
+# Cloud Build uses the project's default Compute Engine service account in this project.
+# Grant image-push access only on the renderer repository, not project-wide.
+resource "google_artifact_registry_repository_iam_member" "cloud_build_writer" {
+  project    = var.project_id
+  location   = google_artifact_registry_repository.renderer.location
+  repository = google_artifact_registry_repository.renderer.name
+  role       = "roles/artifactregistry.writer"
+  member     = "serviceAccount:${data.google_project.current.number}-compute@developer.gserviceaccount.com"
+}
+
 resource "google_storage_bucket" "media" {
   project                     = var.project_id
   name                        = var.bucket_name
