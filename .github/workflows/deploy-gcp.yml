@@ -124,7 +124,7 @@ jobs:
         run: |
           set -euo pipefail
           IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/klassyfic-media/renderer:latest"
-          gcloud builds submit --project="$PROJECT_ID" --tag="$IMAGE" renderer/
+          gcloud builds submit --project="$PROJECT_ID" --tag="$IMAGE" --suppress-logs renderer/
 
       - name: Apply complete GCP infrastructure
         working-directory: infra/gcp
