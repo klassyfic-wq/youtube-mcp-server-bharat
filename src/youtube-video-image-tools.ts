@@ -113,6 +113,7 @@ export function registerVideoImageTools(server: McpServer, authProps: Props | un
       if (!providerResponse.ok) {
         const errorPayload = await providerResponse.json().catch(() => ({})) as {
           requestId?: string;
+          error?: string;
           authDiagnostics?: { secretConfigured?: boolean; authorizationHeaderPresent?: boolean; bearerPrefixPresent?: boolean; tokenMatchesConfiguredSecret?: boolean };
         };
         const diagnostics = errorPayload.authDiagnostics;
@@ -125,7 +126,10 @@ export function registerVideoImageTools(server: McpServer, authProps: Props | un
           ].join(", ");
           throw new Error(`Renderer authentication rejected image request (HTTP 401; ${flags}; requestId=${errorPayload.requestId ?? "unavailable"}). No image was generated.`);
         }
-        throw new Error(`Configured image provider returned HTTP ${providerResponse.status}${errorPayload.requestId ? ` (requestId=${errorPayload.requestId})` : ""}. Check provider authentication and configuration.`);
+        const providerMessage = typeof errorPayload.error === "string"
+          ? errorPayload.error.replace(/[\\r\\n\\t]+/g, " ").replace(/Bearer\\s+[^\\s,;]+/gi, "Bearer [REDACTED]").slice(0, 500)
+          : "";
+        throw new Error(`Configured image provider returned HTTP ${providerResponse.status}${errorPayload.requestId ? ` (requestId=${errorPayload.requestId})` : ""}${providerMessage ? `: ${providerMessage}` : ". Check provider authentication and configuration."}`);
       }
       const payload = await providerResponse.json() as { data?: Array<{ b64_json?: string }> };
       const encoded = payload.data?.[0]?.b64_json;

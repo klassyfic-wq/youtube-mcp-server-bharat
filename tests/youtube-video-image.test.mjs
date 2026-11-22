@@ -109,6 +109,20 @@ test("shared renderer ignores a stale dedicated image key and surfaces safe auth
   } finally { globalThis.fetch = originalFetch; }
 });
 
+test("image adapter surfaces sanitized provider 400 details", async () => {
+  const originalFetch = globalThis.fetch;
+  const kv = fakeKv(); seed(kv); const server = fakeServer();
+  registerVideoImageTools(server, auth, { OAUTH_KV: kv, TTS_API_URL: "https://renderer.example.test/v1/audio/speech", TTS_API_KEY: "shared-test-secret" });
+  globalThis.fetch = async () => new Response(JSON.stringify({ error: "Vertex AI image generation returned HTTP 400 (INVALID_ARGUMENT: Invalid imageConfig aspectRatio).", requestId: "provider-400-id" }), { status: 400 });
+  try {
+    const result = await server.handlers.get("generate_video_scene_image")({ jobId, sceneNumber: 1 });
+    assert.match(result.content[0].text, /HTTP 400/);
+    assert.match(result.content[0].text, /INVALID_ARGUMENT/);
+    assert.match(result.content[0].text, /requestId=provider-400-id/);
+    assert.equal(kv.values.has(`youtube:video-image:${userId}:${jobId}:1`), false);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
 test("image adapter reuses the configured shared renderer endpoint and TTS secret", async () => {
   const originalFetch = globalThis.fetch;
   const kv = fakeKv(); seed(kv); const server = fakeServer();
