@@ -130,13 +130,13 @@ export function registerYoutubeShortsDiscoveryTools(server: McpServer, env: Shor
           snippet?: { title?: string; channelTitle?: string; publishedAt?: string; description?: string; license?: string };
           statistics?: { viewCount?: string; likeCount?: string; commentCount?: string };
           contentDetails?: { duration?: string };
-          status?: { privacyStatus?: string; embeddable?: boolean };
+          status?: { privacyStatus?: string; license?: "youtube" | "creativeCommon"; embeddable?: boolean };
         }> }>(detailsUrl);
         const videos = (details.items ?? [])
           .filter(video => video.status?.privacyStatus === "public")
           .map(video => {
             const viewCount = Number(video.statistics?.viewCount ?? 0);
-            const isCreativeCommon = video.snippet?.license === "creativeCommon";
+            const isCreativeCommon = video.status?.license === "creativeCommon";
             return {
               videoId: video.id,
               title: video.snippet?.title ?? "",
