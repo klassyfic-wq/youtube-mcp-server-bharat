@@ -304,6 +304,7 @@ async function render(jobId, manifest, edits = {}) {
         overlayFile = path.join(work, `scene-${index}.overlay.txt`);
         await writeFile(overlayFile, overlay, "utf8");
       }
+      // Marathi captions use drawtext=fontfile=/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf inside the shared filter helper.
       const videoFilter = buildSceneVideoFilter({ width, height, durationSeconds: durationForScene, sceneNumber: track.sceneNumber, overlayFile });
       await run("ffmpeg", ["-y","-loop","1","-framerate","30","-i",image,"-i",audio,"-t",String(durationForScene),"-vf",videoFilter,"-af",`apad,atrim=duration=${durationForScene}`,"-c:v","libx264","-preset","veryfast","-pix_fmt","yuv420p","-c:a","aac","-b:a","192k","-ar","48000","-movflags","+faststart","-shortest",clip]);
       clips.push(clip);
