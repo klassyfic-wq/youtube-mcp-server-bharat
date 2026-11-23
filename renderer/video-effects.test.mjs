@@ -30,8 +30,8 @@ test("rejects invalid dimensions, duration and scene numbers", () => {
 test("builds sequential xfade and audio crossfade transitions from the scene plan", () => {
   const args = buildSceneJoinArgs({ clipPaths: ["/tmp/a.mp4", "/tmp/b.mp4", "/tmp/c.mp4", "/tmp/d.mp4"], durations: [5, 6, 7, 8], transitions: ["fade", "cut", "dissolve", "slide"], outputPath: "/tmp/joined.mp4" });
   const graph = args[args.indexOf("-filter_complex") + 1];
-  assert.match(graph, /xfade=transition=fade:duration=0\\.010:offset=4\\.990/);
-  assert.match(graph, /xfade=transition=dissolve:duration=0\\.350:offset=10\\.640/);
+  assert.match(graph, /xfade=transition=fade:duration=0\.010:offset=4\.990/);
+  assert.match(graph, /xfade=transition=dissolve:duration=0\.350:offset=10\.640/);
   assert.match(graph, /xfade=transition=slideleft/);
   assert.match(graph, /acrossfade/);
 });
