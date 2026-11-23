@@ -31,7 +31,7 @@ async function rendererFailure(response:Response,context:string):Promise<Error>{
   const safeMessage=rawMessage
     .replace(/https?:\/\/[^\s"'<>]+/gi,"[redacted-url]")
     .replace(/Bearer\s+[^\s"'<>]+/gi,"Bearer [redacted]")
-    .replace(/(?:token|secret|authorization)\s*[:=]\s*[^\s,;]+/gi,"$1=[redacted]")
+    .replace(/(?:token|secret|authorization)\s*[:=]\s*[^\s,;]+/gi,"[redacted]")
     .slice(0,500)
     .trim();
   const headerRequestId=response.headers.get("x-request-id");
