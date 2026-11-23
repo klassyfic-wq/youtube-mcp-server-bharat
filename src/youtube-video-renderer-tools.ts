@@ -23,6 +23,22 @@ const randomToken=()=>Array.from(crypto.getRandomValues(new Uint8Array(32)),b=>b
 function formatSrtTime(seconds:number){const ms=Math.max(0,Math.round(seconds*1000));const h=Math.floor(ms/3600000),m=Math.floor(ms%3600000/60000),s=Math.floor(ms%60000/1000),milli=ms%1000;return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")},${String(milli).padStart(3,"0")}`;}
 function response(v:unknown){return{content:[{type:"text" as const,text:JSON.stringify(v,null,2)}]};}
 function failure(e:unknown){console.error("Video renderer request failed:",e instanceof Error?e.message:"unknown error");return{content:[{type:"text" as const,text:e instanceof Error?e.message:"Video renderer request failed."}],isError:true};}
+async function rendererFailure(response:Response,context:string):Promise<Error>{
+  const raw=await response.text().catch(()=>"");
+  let payload:Record<string,unknown>={};
+  try{const parsed=JSON.parse(raw.slice(0,8192));if(parsed&&typeof parsed==="object")payload=parsed as Record<string,unknown>;}catch{}
+  const rawMessage=typeof payload.error==="string"?payload.error:typeof payload.message==="string"?payload.message:raw;
+  const safeMessage=rawMessage
+    .replace(/https?:\/\/[^\s"'<>]+/gi,"[redacted-url]")
+    .replace(/Bearer\s+[^\s"'<>]+/gi,"Bearer [redacted]")
+    .replace(/(?:token|secret|authorization)\s*[:=]\s*[^\s,;]+/gi,"[redacted]")
+    .slice(0,500)
+    .trim();
+  const headerRequestId=response.headers.get("x-request-id");
+  const bodyRequestId=typeof payload.requestId==="string"&&/^[a-zA-Z0-9-]{1,80}$/.test(payload.requestId)?payload.requestId:null;
+  const requestId=bodyRequestId??(headerRequestId&&/^[a-zA-Z0-9-]{1,80}$/.test(headerRequestId)?headerRequestId:null);
+  return new Error(`${context} HTTP ${response.status}${safeMessage?`: ${safeMessage}`:""}${requestId?` (requestId: ${requestId})`:""}.`);
+}
 function rendererApiKey(env:RendererEnv):string{
   const key=env.RENDERER_API_KEY??env.TTS_API_KEY;
   if(!key)throw new Error("External renderer is not configured. Set RENDERER_API_KEY or the shared TTS_API_KEY secret.");
@@ -100,7 +116,7 @@ export function registerVideoRendererTools(server:McpServer,authProps:Props|unde
         ...(sceneNumber === undefined ? {} : { subtitles: { format: "srt", content: `1\n00:00:00,000 --> ${formatSrtTime(selectedTrack.durationSeconds)}\n${String(selectedTrack.narrationText ?? "").trim()}\n` } }),
       };
       const upstream=await fetch(new URL("/render",endpoint),{method:"POST",headers:{Authorization:`Bearer ${rendererApiKey(env)}`,"Content-Type":"application/json"},body:JSON.stringify({jobId,manifest:renderManifest}),signal:AbortSignal.timeout(30_000)});
-      if(upstream.status!==202)throw new Error(`External renderer returned HTTP ${upstream.status}.`);
+      if(upstream.status!==202)throw await rendererFailure(upstream,"External renderer returned");
       const result=await upstream.json() as Record<string,unknown>;
       job.stage="render";job.artifacts={...job.artifacts,videoPreview:`renderer://${jobId}`};job.updatedAt=new Date().toISOString();
       await env.OAUTH_KV.put(jobKey(userId,jobId),JSON.stringify(job),{expirationTtl:30*24*60*60});
@@ -141,7 +157,7 @@ export function registerVideoRendererTools(server:McpServer,authProps:Props|unde
       const job=JSON.parse(raw) as Job;if(job.userId!==userId||job.stage!=="review")throw new Error("A rendered preview for this account is required before editing.");
       const base=rendererBase(env);
       const upstream=await fetch(new URL(`/preview/${jobId}`,base),{method:"POST",headers:{Authorization:`Bearer ${rendererApiKey(env)}`,"Content-Type":"application/json"},body:JSON.stringify({edits:{subtitleSrt}}),signal:AbortSignal.timeout(30_000)});
-      if(upstream.status!==202)throw new Error(`Renderer edit endpoint returned HTTP ${upstream.status}.`);
+      if(upstream.status!==202)throw await rendererFailure(upstream,"Renderer edit endpoint returned");
       const result=await upstream.json() as Record<string,unknown>;
       job.stage="render";job.updatedAt=new Date().toISOString();
       await env.OAUTH_KV.put(jobKey(userId,jobId),JSON.stringify(job),{expirationTtl:30*24*60*60});

@@ -68,7 +68,7 @@ export function registerVideoWorkflowTools(server: McpServer, authProps: Props |
         topic: z.string().trim().min(3).max(500),
         title: z.string().trim().min(1).max(100),
         language: z.string().trim().min(2).max(40),
-        durationMinutes: z.number().min(0.25).max(180),
+        durationMinutes: z.number().min(1 / 6).max(180),
         audience: z.string().trim().min(2).max(200),
         aspectRatio: z.enum(["16:9", "9:16", "1:1"]).default("16:9"),
         tone: z.string().trim().min(2).max(100).default("clear and engaging"),
