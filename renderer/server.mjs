@@ -310,10 +310,13 @@ async function render(jobId, manifest, edits = {}) {
       await run("ffmpeg", ["-y","-loop","1","-framerate","30","-i",image,"-i",audio,"-t",String(durationForScene),"-vf",videoFilter,"-af",`apad,atrim=duration=${durationForScene}`,"-c:v","libx264","-preset","veryfast","-pix_fmt","yuv420p","-c:a","aac","-b:a","192k","-ar","48000","-movflags","+faststart","-shortest",clip]);
       clips.push(clip);
     }
-    const list = path.join(work, "concat.txt");
-    await writeFile(list, clips.map(p => `file '${p.replaceAll("'","'\\''")}'`).join("\n"));
     const rawVideo = path.join(work, "joined.mp4");
-    await run("ffmpeg", ["-y","-f","concat","-safe","0","-i",list,"-c","copy",rawVideo]);
+    await run("ffmpeg", buildSceneJoinArgs({
+      clipPaths: clips,
+      durations: actualDurations,
+      transitions: tracks.map(track => track.transition ?? "cut"),
+      outputPath: rawVideo,
+    }));
     const subtitle = path.join(work, "subtitles.srt");
     await writeFile(subtitle, edits.subtitleSrt ?? buildTimedSubtitles(tracks, actualDurations), "utf8");
     const output = path.join(finalDir, "preview.mp4");
