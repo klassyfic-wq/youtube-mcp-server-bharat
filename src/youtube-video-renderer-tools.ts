@@ -85,7 +85,7 @@ export async function handleVideoPreviewRequest(request:Request,env:RendererEnv)
 export async function handleShortsPreviewRequest(request:Request,env:RendererEnv):Promise<Response>{
   const headers={"Cache-Control":"private, no-store, max-age=0","X-Content-Type-Options":"nosniff","Referrer-Policy":"no-referrer"};
   if(request.method!=="GET")return new Response("Method not allowed",{status:405,headers:{...headers,Allow:"GET"}});
-  const match=new URL(request.url).pathname.match(/^\\/media\\/shorts-preview\\/([a-f0-9]{64})$/);
+  const match=new URL(request.url).pathname.match(/^\/media\/shorts-preview\/([a-f0-9]{64})$/);
   if(!match)return new Response("Not found",{status:404,headers});
   try{
     const raw=await env.OAUTH_KV.get(shortsPreviewGrantKey(match[1]));
