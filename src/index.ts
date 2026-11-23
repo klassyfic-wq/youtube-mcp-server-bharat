@@ -8,6 +8,7 @@ import { registerYoutubeManagementTools } from "./youtube-management-tools";
 import { registerYoutubeUploadTools } from "./youtube-upload-tools";
 import { registerVideoWorkflowTools } from "./youtube-video-workflow-tools";
 import { registerYoutubeShortsDiscoveryTools } from "./youtube-shorts-discovery-tools";
+import { registerYoutubeShortsRightsTools } from "./youtube-shorts-rights-tools";
 import { registerAiVideoPlanningTools } from "./youtube-ai-planning-tools";
 import { registerVideoMediaManifestTools } from "./youtube-media-manifest-tools";
 import { registerVideoVoiceTools } from "./youtube-video-voice-tools";
@@ -126,6 +127,7 @@ function createServer() {
   registerYoutubeUploadTools(server, authProps, env);
   registerVideoWorkflowTools(server, authProps, env);
   registerYoutubeShortsDiscoveryTools(server, env);
+  registerYoutubeShortsRightsTools(server);
   registerAiVideoPlanningTools(server, authProps, env);
   registerVideoMediaManifestTools(server, authProps, env);
   registerVideoVoiceTools(server, authProps, env);
