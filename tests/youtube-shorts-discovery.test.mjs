@@ -25,9 +25,9 @@ test("public video search sorts by views and reports licence metadata without gr
       ] });
     }
     return Response.json({ items: [
-      { id: "abcdefghijk", snippet: { title: "Lower views", channelTitle: "Creator A", license: "creativeCommon" }, statistics: { viewCount: "500", likeCount: "10" }, contentDetails: { duration: "PT2M" }, status: { privacyStatus: "public", embeddable: true } },
-      { id: "lmnopqrstuv", snippet: { title: "Higher views", channelTitle: "Creator B", license: "creativeCommon" }, statistics: { viewCount: "9000", likeCount: "100" }, contentDetails: { duration: "PT5M" }, status: { privacyStatus: "public", embeddable: true } },
-      { id: "standard1234", snippet: { title: "Standard licence must be excluded", channelTitle: "Creator C", license: "youtube" }, statistics: { viewCount: "99000", likeCount: "500" }, contentDetails: { duration: "PT1M" }, status: { privacyStatus: "public", embeddable: true } },
+      { id: "abcdefghijk", snippet: { title: "Lower views", channelTitle: "Creator A" }, statistics: { viewCount: "500", likeCount: "10" }, contentDetails: { duration: "PT2M" }, status: { privacyStatus: "public", license: "creativeCommon", embeddable: true } },
+      { id: "lmnopqrstuv", snippet: { title: "Higher views", channelTitle: "Creator B" }, statistics: { viewCount: "9000", likeCount: "100" }, contentDetails: { duration: "PT5M" }, status: { privacyStatus: "public", license: "creativeCommon", embeddable: true } },
+      { id: "standard1234", snippet: { title: "Standard licence must be excluded", channelTitle: "Creator C" }, statistics: { viewCount: "99000", likeCount: "500" }, contentDetails: { duration: "PT1M" }, status: { privacyStatus: "public", license: "youtube", embeddable: true } },
     ] });
   };
   try {
