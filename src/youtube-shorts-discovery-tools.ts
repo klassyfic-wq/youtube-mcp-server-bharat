@@ -153,6 +153,7 @@ export function registerYoutubeShortsDiscoveryTools(server: McpServer, env: Shor
               embeddable: video.status?.embeddable ?? false,
             };
           })
+          .filter(video => license !== "creativeCommon" || video.licenseMetadata === "creativeCommon")
           .filter(video => minViews === undefined || video.viewCount >= minViews)
           .sort((a, b) => b.viewCount - a.viewCount)
           .slice(0, maxResults);
