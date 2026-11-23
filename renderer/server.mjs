@@ -1,6 +1,6 @@
 import http from "node:http";
 import { generateVertexImage, synthesizeCloudSpeech } from "./google-media.mjs";
-import { buildSceneVideoFilter } from "./video-effects.mjs";
+import { buildSceneJoinArgs, buildSceneVideoFilter } from "./video-effects.mjs";
 import { createShortsPreview, readShortsPreview } from "./shorts-preview.mjs";
 import { spawn } from "node:child_process";
 import { mkdtemp, mkdir, readFile, rm, writeFile, stat, readdir } from "node:fs/promises";
