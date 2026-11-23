@@ -21,11 +21,13 @@ test("public video search sorts by views and reports licence metadata without gr
       return Response.json({ items: [
         { id: { videoId: "abcdefghijk" } },
         { id: { videoId: "lmnopqrstuv" } },
+        { id: { videoId: "standard1234" } },
       ] });
     }
     return Response.json({ items: [
       { id: "abcdefghijk", snippet: { title: "Lower views", channelTitle: "Creator A", license: "creativeCommon" }, statistics: { viewCount: "500", likeCount: "10" }, contentDetails: { duration: "PT2M" }, status: { privacyStatus: "public", embeddable: true } },
       { id: "lmnopqrstuv", snippet: { title: "Higher views", channelTitle: "Creator B", license: "creativeCommon" }, statistics: { viewCount: "9000", likeCount: "100" }, contentDetails: { duration: "PT5M" }, status: { privacyStatus: "public", embeddable: true } },
+      { id: "standard1234", snippet: { title: "Standard licence must be excluded", channelTitle: "Creator C", license: "youtube" }, statistics: { viewCount: "99000", likeCount: "500" }, contentDetails: { duration: "PT1M" }, status: { privacyStatus: "public", embeddable: true } },
     ] });
   };
   try {
@@ -34,6 +36,9 @@ test("public video search sorts by views and reports licence metadata without gr
     assert.equal(data.videos[0].title, "Higher views");
     assert.equal(data.videos[0].viewCount, 9000);
     assert.equal(data.videos[0].rightsReview.startsWith("Creative Commons licence metadata found"), true);
+    assert.equal(data.videos.length, 2);
+    assert.equal(data.videos.some(video => video.videoId === "standard1234"), false);
+    assert.equal(data.videos.every(video => video.licenseMetadata === "creativeCommon"), true);
     assert.equal(requests.length, 2);
   } finally {
     globalThis.fetch = originalFetch;
