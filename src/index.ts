@@ -14,7 +14,7 @@ import { registerVideoMediaManifestTools } from "./youtube-media-manifest-tools"
 import { registerVideoVoiceTools } from "./youtube-video-voice-tools";
 import { handleAudioArtifactRequest, registerAudioDeliveryTools } from "./youtube-audio-delivery";
 import { handleImageArtifactRequest, registerVideoImageTools } from "./youtube-video-image-tools";
-import { handleVideoPreviewRequest, registerVideoRendererTools } from "./youtube-video-renderer-tools";
+import { handleShortsPreviewRequest, handleVideoPreviewRequest, registerVideoRendererTools } from "./youtube-video-renderer-tools";
 import type { Props } from "./utils";
 import { getValidGoogleAccessToken } from "./utils";
 
@@ -161,6 +161,9 @@ export default {
     }
     if (pathname.startsWith("/media/image/")) {
       return handleImageArtifactRequest(request, env);
+    }
+    if (pathname.startsWith("/media/shorts-preview/")) {
+      return handleShortsPreviewRequest(request, env);
     }
     if (pathname.startsWith("/media/preview/")) {
       return handleVideoPreviewRequest(request, env);
