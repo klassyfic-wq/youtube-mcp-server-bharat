@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildSceneVideoFilter } from "./video-effects.mjs";
+import { buildSceneJoinArgs, buildSceneVideoFilter } from "./video-effects.mjs";
 
 test("builds a vertical scene filter with subtle push-in motion", () => {
   const filter = buildSceneVideoFilter({ width: 1080, height: 1920, durationSeconds: 30, sceneNumber: 1 });
