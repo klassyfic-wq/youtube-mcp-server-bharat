@@ -101,8 +101,9 @@ async function queueRenderUnlocked(jobId, manifest, edits = {}, revision = 0, is
   const record = { status: CLOUD_RUN_JOBS_MODE ? "queued" : "rendering", manifest, edits, revision, updatedAt: new Date().toISOString() };
   await persistJob(jobId, record);
   if (CLOUD_RUN_JOBS_MODE) {
+    let executionName;
     try {
-      const executionName = await dispatchCloudRunJob(jobId);
+      executionName = await dispatchCloudRunJob(jobId);
       // The worker may start (or even finish) before :run returns. Merge the
       // execution name into the latest persisted record rather than overwriting
       // a worker's rendering/terminal state with the stale queued snapshot.
