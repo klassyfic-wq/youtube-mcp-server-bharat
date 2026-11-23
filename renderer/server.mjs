@@ -1,5 +1,6 @@
 import http from "node:http";
 import { generateVertexImage, synthesizeCloudSpeech } from "./google-media.mjs";
+import { buildSceneVideoFilter } from "./video-effects.mjs";
 import { spawn } from "node:child_process";
 import { mkdtemp, mkdir, readFile, rm, writeFile, stat, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -298,12 +299,12 @@ async function render(jobId, manifest, edits = {}) {
       const durationForScene = Number(Math.max(track.durationSeconds, audioDuration).toFixed(3));
       actualDurations.push(durationForScene);
       const overlay = typeof track.onScreenText === "string" ? track.onScreenText.trim().slice(0, 200) : "";
-      let videoFilter = `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1,fps=30`;
+      let overlayFile;
       if (overlay) {
-        const overlayFile = path.join(work, `scene-${index}.overlay.txt`);
+        overlayFile = path.join(work, `scene-${index}.overlay.txt`);
         await writeFile(overlayFile, overlay, "utf8");
-        videoFilter += `,drawtext=fontfile=/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf:textfile=${overlayFile}:fontcolor=white:fontsize=56:box=1:boxcolor=black@0.55:boxborderw=20:x=(w-text_w)/2:y=h-text_h-90`;
       }
+      const videoFilter = buildSceneVideoFilter({ width, height, durationSeconds: durationForScene, sceneNumber: track.sceneNumber, overlayFile });
       await run("ffmpeg", ["-y","-loop","1","-framerate","30","-i",image,"-i",audio,"-t",String(durationForScene),"-vf",videoFilter,"-af",`apad,atrim=duration=${durationForScene}`,"-c:v","libx264","-preset","veryfast","-pix_fmt","yuv420p","-c:a","aac","-b:a","192k","-ar","48000","-movflags","+faststart","-shortest",clip]);
       clips.push(clip);
     }
