@@ -369,7 +369,7 @@ const app = http.createServer(async (req,res) => {
       const preview = await createShortsPreview({ payload, allowedHosts: ALLOWED_HOSTS, dataDir: DATA_DIR });
       return send(res, 200, preview);
     }
-    const shortsPreviewMatch = url.pathname.match(/^\\/shorts-preview\\/([0-9a-f-]{36})$/i);
+    const shortsPreviewMatch = url.pathname.match(/^\/shorts-preview\/([0-9a-f-]{36})$/i);
     if (req.method === "GET" && shortsPreviewMatch) {
       const preview = await readShortsPreview({ previewId: shortsPreviewMatch[1], dataDir: DATA_DIR });
       res.writeHead(200, { "content-type": "video/mp4", "content-length": preview.byteLength, "cache-control": "private, no-store", "x-content-type-options": "nosniff", "content-disposition": `inline; filename="shorts-${shortsPreviewMatch[1]}.mp4"` });
