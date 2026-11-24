@@ -60,7 +60,7 @@ def make_png(path, variant):
             row.extend(rgb)
         rows.append(bytes(row))
     raw = b"".join(rows)
-    data = b"\\x89PNG\\r\\n\\x1a\\n"
+    data = b"\x89PNG\r\n\x1a\n"
     data += chunk(b"IHDR", struct.pack(">2I5B", W, H, 8, 2, 0, 0, 0))
     data += chunk(b"IDAT", zlib.compress(raw, 6))
     data += chunk(b"IEND", b"")
