@@ -109,3 +109,77 @@ test("renderer reuses the existing TTS endpoint and shared bearer secret", async
     assert.equal(target.pathname, "/render");
   } finally { globalThis.fetch = originalFetch; }
 });
+
+
+test("authorized Shorts preview blocks missing human review before calling renderer", async () => {
+  const kv = fakeKv();
+  const server = fakeServer();
+  registerVideoRendererTools(server, auth, { ...env, OAUTH_KV: kv });
+  const originalFetch = globalThis.fetch;
+  let called = false;
+  globalThis.fetch = async () => { called = true; throw new Error("renderer must not be called"); };
+  try {
+    const result = await server.handlers.get("render_authorized_shorts_preview")({
+      sourceVideoUrl: "https://storage.googleapis.com/rights-cleared/source.mp4",
+      startSeconds: 12,
+      endSeconds: 42,
+      licenseMetadata: "youtube",
+      creatorPermissionConfirmed: true,
+      thirdPartyAudioCleared: true,
+      thirdPartyVisualsCleared: true,
+      attributionPlan: "",
+      authorizedSourceFileProvided: true,
+      humanReviewConfirmed: false,
+    });
+    assert.equal(result.isError, true);
+    assert.match(result.content[0].text, /human review/);
+    assert.equal(called, false);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("authorized Shorts preview sends only reviewed source and returns private preview link", async () => {
+  const kv = fakeKv();
+  const server = fakeServer();
+  registerVideoRendererTools(server, auth, { ...env, OAUTH_KV: kv });
+  const originalFetch = globalThis.fetch;
+  let sent;
+  globalThis.fetch = async (url, init) => {
+    const target = new URL(url);
+    assert.equal(target.origin, env.RENDERER_API_URL);
+    assert.equal(target.pathname, "/v1/shorts/preview");
+    assert.equal(new Headers(init.headers).get("Authorization"), "Bearer renderer-secret");
+    sent = JSON.parse(init.body);
+    return new Response(JSON.stringify({
+      previewId: "0a7e8d3f-3a12-4b7d-8f41-5e4a2d9c0b11",
+      status: "preview_ready",
+      durationSeconds: 30,
+      byteLength: 45678,
+      aspectRatio: "9:16",
+      published: false,
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  try {
+    const result = parse(await server.handlers.get("render_authorized_shorts_preview")({
+      sourceVideoUrl: "https://storage.googleapis.com/rights-cleared/source.mp4",
+      startSeconds: 12,
+      endSeconds: 42,
+      subtitlesSrt: "1\\n00:00:00,000 --> 00:00:30,000\\nनमस्कार\\n",
+      licenseMetadata: "youtube",
+      creatorPermissionConfirmed: true,
+      thirdPartyAudioCleared: true,
+      thirdPartyVisualsCleared: true,
+      attributionPlan: "",
+      authorizedSourceFileProvided: true,
+      humanReviewConfirmed: true,
+    }));
+    assert.equal(sent.sourceVideoUrl, "https://storage.googleapis.com/rights-cleared/source.mp4");
+    assert.equal(sent.startSeconds, 12);
+    assert.equal(sent.endSeconds, 42);
+    assert.match(sent.subtitlesSrt, /नमस्कार/);
+    assert.equal(result.status, "preview_ready");
+    assert.match(result.previewUrl, /^https:\\/\\/worker\\.example\\.test\\/media\\/shorts-preview\\//);
+    assert.match(result.rightsReview, /not independently verified/);
+    assert.match(result.note, /No YouTube upload/);
+    assert.equal([...kv.values.keys()].some(key => key.startsWith("youtube:shorts-preview-grant:")), true);
+  } finally { globalThis.fetch = originalFetch; }
+});
