@@ -179,7 +179,7 @@ test("authorized Shorts preview sends only reviewed source and returns private p
     assert.equal(result.status, "preview_ready");
     const previewUrl = new URL(result.previewUrl);
     assert.equal(previewUrl.hostname, "worker.example.test");
-    assert.match(previewUrl.pathname, /^\\/media\\/shorts-preview\\//);
+    assert.equal(previewUrl.pathname.startsWith("/media/shorts-preview/"), true);
     assert.match(result.rightsReview, /not independently verified/);
     assert.match(result.note, /No YouTube upload/);
     assert.equal([...kv.values.keys()].some(key => key.startsWith("youtube:shorts-preview-grant:")), true);
