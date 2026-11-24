@@ -24,16 +24,65 @@ gcloud secrets versions access latest \
 printf 'header = "Authorization: Bearer %s"\n' "$(cat "$TMP_DIR/renderer-secret")" > "$TMP_DIR/curl.conf"
 chmod 600 "$TMP_DIR/curl.conf"
 
-# Generate two original AI scene images through the production Vertex endpoint.
-curl --config "$TMP_DIR/curl.conf" --fail-with-body --silent --show-error \
-  -H 'Content-Type: application/json' \
-  -d '{"model":"gemini-2.5-flash-image","prompt":"Cinematic 16:9 illustration of a warm sunrise over a peaceful Indian village, lush green landscape, vibrant natural colors, professional animation background, no words, no lettering, no logos","n":1,"size":"1024x1024","response_format":"b64_json"}' \
-  "$RENDERER_URL/v1/images/generations" -o "$TMP_DIR/scene-1-image.json"
-curl --config "$TMP_DIR/curl.conf" --fail-with-body --silent --show-error \
-  -H 'Content-Type: application/json' \
-  -d '{"model":"gemini-2.5-flash-image","prompt":"Cinematic 16:9 illustration of a curious child exploring a colorful science garden with simple glowing experiments, friendly educational animation style, rich details, no words, no lettering, no logos","n":1,"size":"1024x1024","response_format":"b64_json"}' \
-  "$RENDERER_URL/v1/images/generations" -o "$TMP_DIR/scene-2-image.json"
-python3 - "$TMP_DIR" <<'PY'
+IMAGE_SOURCE="vertex-ai"
+if [[ "${E2E_USE_SYNTHETIC_IMAGES:-false}" == "true" ]]; then
+  IMAGE_SOURCE="synthetic-fallback"
+  echo "::warning::Using deterministic synthetic PNG test frames because Vertex AI image access is blocked by account eligibility."
+  python3 - "$TMP_DIR" <<'PY'
+import math, pathlib, struct, sys, zlib
+base = pathlib.Path(sys.argv[1])
+W, H = 1280, 720
+
+def chunk(kind, data):
+    return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xffffffff)
+
+def make_png(path, variant):
+    rows = []
+    for y in range(H):
+        row = bytearray([0])
+        for x in range(W):
+            sky = y < 455
+            if variant == 1:
+                top, bottom, land = (20, 55, 105), (250, 165, 95), (42, 125, 78)
+            else:
+                top, bottom, land = (34, 32, 100), (100, 190, 210), (35, 112, 112)
+            t = min(1.0, y / 455)
+            if sky:
+                rgb = tuple(int(top[i] * (1-t) + bottom[i] * t) for i in range(3))
+                sun_x, sun_y = (1010, 175) if variant == 1 else (260, 190)
+                if (x-sun_x)**2 + (y-sun_y)**2 < 78**2:
+                    rgb = (255, 225, 145) if variant == 1 else (245, 235, 170)
+            else:
+                hill = 470 + int(55 * math.sin(x / 155 + variant)) + int(22 * math.sin(x / 61))
+                rgb = land if y > hill else tuple(min(255, c + 35) for c in land)
+                if y > 610 and ((x // 42 + variant) % 5 == 0):
+                    rgb = tuple(max(0, c - 18) for c in rgb)
+            row.extend(rgb)
+        rows.append(bytes(row))
+    raw = b"".join(rows)
+    data = b"\x89PNG\r\n\x1a\n"
+    data += chunk(b"IHDR", struct.pack(">2I5B", W, H, 8, 2, 0, 0, 0))
+    data += chunk(b"IDAT", zlib.compress(raw, 6))
+    data += chunk(b"IEND", b"")
+    path.write_bytes(data)
+
+for n in (1, 2):
+    path = base / f"scene-{n}.png"
+    make_png(path, n)
+    assert path.stat().st_size > 1000
+    print(f"Synthetic E2E scene {n}: PASS ({path.stat().st_size} bytes)")
+PY
+else
+  # Generate two original AI scene images through the production Vertex endpoint.
+  curl --config "$TMP_DIR/curl.conf" --fail-with-body --silent --show-error \
+    -H 'Content-Type: application/json' \
+    -d '{"model":"gemini-2.5-flash-image","prompt":"Cinematic 16:9 illustration of a warm sunrise over a peaceful Indian village, lush green landscape, vibrant natural colors, professional animation background, no words, no lettering, no logos","n":1,"size":"1024x1024","response_format":"b64_json"}' \
+    "$RENDERER_URL/v1/images/generations" -o "$TMP_DIR/scene-1-image.json"
+  curl --config "$TMP_DIR/curl.conf" --fail-with-body --silent --show-error \
+    -H 'Content-Type: application/json' \
+    -d '{"model":"gemini-2.5-flash-image","prompt":"Cinematic 16:9 illustration of a curious child exploring a colorful science garden with simple glowing experiments, friendly educational animation style, rich details, no words, no lettering, no logos","n":1,"size":"1024x1024","response_format":"b64_json"}' \
+    "$RENDERER_URL/v1/images/generations" -o "$TMP_DIR/scene-2-image.json"
+  python3 - "$TMP_DIR" <<'PY'
 import base64, json, pathlib, sys
 base = pathlib.Path(sys.argv[1])
 for index in (1, 2):
@@ -46,6 +95,7 @@ for index in (1, 2):
     (base / f"scene-{index}.png").write_bytes(image)
     print(f"Vertex AI scene {index}: PASS ({len(image)} bytes)")
 PY
+fi
 
 curl --config "$TMP_DIR/curl.conf" --fail-with-body --silent --show-error \
   -H 'Content-Type: application/json' \
