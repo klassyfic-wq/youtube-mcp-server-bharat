@@ -66,7 +66,7 @@ async function analyzeTranscript(env: ShortsEnv, input: {
   if (timestamps.some((value, index) => index > 0 && value < timestamps[index - 1])) {
     throw new Error("Transcript timestamps must be in chronological order.");
   }
-  if (timestamps.at(-1)! > input.videoDurationSeconds + 1) {
+  if (timestamps[timestamps.length - 1] > input.videoDurationSeconds + 1) {
     throw new Error("Transcript contains a timestamp beyond the supplied video duration.");
   }
   if (!env.AI_API_URL || !env.AI_API_KEY || !env.AI_MODEL) {
@@ -216,7 +216,7 @@ export function registerYoutubeShortsDiscoveryTools(server: McpServer, env: Shor
           transcriptTiming: {
             timestampCount: transcriptTimestamps(input.transcript).length,
             firstTimestampSeconds: transcriptTimestamps(input.transcript)[0],
-            lastTimestampSeconds: transcriptTimestamps(input.transcript).at(-1),
+            lastTimestampSeconds: transcriptTimestamps(input.transcript).slice(-1)[0],
             validatedAgainstVideoDuration: true,
           },
           rightsStatus: "not_assessed",
