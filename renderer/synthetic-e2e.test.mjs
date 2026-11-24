@@ -162,7 +162,7 @@ test("synthetic HTTP-to-FFmpeg render produces a playable MP4 with synchronized 
   await writeFile(previewPath, Buffer.from(await previewResponse.arrayBuffer()));
 
   const probe = spawnSync("ffprobe", [
-    "-v", "error", "-show_entries", "stream=codec_type,width,height",
+    "-v", "error", "-show_entries", "stream=codec_type,width,height,duration",
     "-show_entries", "format=duration", "-of", "json", previewPath
   ], { encoding: "utf8" });
   assert.equal(probe.status, 0, probe.stderr);
@@ -173,6 +173,9 @@ test("synthetic HTTP-to-FFmpeg render produces a playable MP4 with synchronized 
   assert.ok(sound, "Rendered preview must retain the source narration audio.");
   assert.equal(video.width, 1920);
   assert.equal(video.height, 1080);
+  assert.ok(Number.isFinite(Number(video.duration)));
+  assert.ok(Number.isFinite(Number(sound.duration)));
+  assert.ok(Math.abs(Number(video.duration) - Number(sound.duration)) <= 0.2, "Narration audio and video must remain synchronized.");
   assert.ok(Number(metadata.format.duration) >= 3.5);
   assert.ok(Number(metadata.format.duration) <= 5.0);
 
