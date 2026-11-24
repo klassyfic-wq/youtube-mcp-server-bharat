@@ -26,7 +26,7 @@ export async function generateVertexImage({ projectId, location = "global", mode
     headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json", "x-goog-user-project": projectId },
     body: JSON.stringify({
       contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: { responseModalities: ["TEXT", "IMAGE"], candidateCount: 1, imageConfig: { aspectRatio } },
+      generationConfig: { responseModalities: ["TEXT", "IMAGE"], imageConfig: { aspectRatio } },
     }),
     signal: AbortSignal.timeout(120000),
   });

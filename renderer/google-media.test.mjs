@@ -16,6 +16,7 @@ test("Vertex image adapter sends bounded prompt and returns validated PNG", asyn
   assert.match(request.url, /locations\/global\/publishers\/google\/models\/gemini-2.5-flash-image:generateContent$/);
   assert.equal(request.headers.get("authorization"), "Bearer test-token");
   assert.equal(request.body.generationConfig.imageConfig.aspectRatio, "16:9");
+  assert.equal("candidateCount" in request.body.generationConfig, false);
   assert.equal(result.mimeType, "image/png");
   assert.equal(result.base64, png);
 });

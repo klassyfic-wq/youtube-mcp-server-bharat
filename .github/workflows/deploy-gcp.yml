@@ -250,10 +250,26 @@ jobs:
           print(f"Marathi Chirp 3 HD TTS: PASS ({len(data)} bytes)")
           PY
 
-          curl --config "$tmp/curl.conf" --fail-with-body --silent --show-error \
+          image_status="$(curl --config "$tmp/curl.conf" --silent --show-error \
             -H 'Content-Type: application/json' \
             -d '{"model":"gemini-2.5-flash-image","prompt":"A clean cinematic illustration of a colorful paper kite flying over a green field at sunrise, no text or lettering","n":1,"size":"1024x1024","response_format":"b64_json"}' \
-            "$RENDERER_URL/v1/images/generations" -o "$tmp/image.json"
+            "$RENDERER_URL/v1/images/generations" -o "$tmp/image.json" -w '%{http_code}')"
+          if [[ "$image_status" != "200" ]]; then
+            python - "$tmp/image.json" "$image_status" <<'PY'
+          import json, re, sys
+          raw = open(sys.argv[1], encoding="utf-8", errors="replace").read()
+          try:
+              payload = json.loads(raw)
+          except Exception:
+              payload = {"response": raw[:2000]}
+          message = payload.get("error", payload)
+          if isinstance(message, dict):
+              message = {k: v for k, v in message.items() if k.lower() not in {"authorization", "token", "access_token"}}
+          print(f"Vertex image smoke test HTTP {sys.argv[2]}: {json.dumps(message, ensure_ascii=False)[:3000]}")
+          PY
+            echo "::error::Vertex image generation smoke test failed with HTTP $image_status."
+            exit 1
+          fi
           python - "$tmp/image.json" <<'PY'
           import base64, json, sys
           payload = json.load(open(sys.argv[1], encoding="utf-8"))
