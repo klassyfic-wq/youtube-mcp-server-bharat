@@ -85,6 +85,7 @@ sign_url() {
   local object="$1"
   gcloud storage sign-url "gs://$MEDIA_BUCKET/$object" \
     --duration=20m \
+    --region="$REGION" \
     --impersonate-service-account="$SIGNER_SERVICE_ACCOUNT" \
     --format='value(signed_url)'
 }
