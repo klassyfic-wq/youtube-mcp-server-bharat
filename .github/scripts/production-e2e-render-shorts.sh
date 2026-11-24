@@ -200,7 +200,7 @@ cat > "$OUT_DIR/README.txt" <<EOF
 Production synthetic E2E run: ${GITHUB_RUN_ID:-manual}-${GITHUB_RUN_ATTEMPT:-1}
 Render job ID: $JOB_ID
 Shorts preview ID: $SHORTS_ID
-Both videos were generated only from synthetic test patterns and Marathi TTS.
+Both videos were generated only from original Vertex AI scenes and Marathi TTS.
 No third-party or YouTube source media was used. Nothing was uploaded or published to YouTube.
 EOF
 printf 'Production renderer E2E passed. Render job=%s Shorts preview=%s\n' "$JOB_ID" "$SHORTS_ID"
