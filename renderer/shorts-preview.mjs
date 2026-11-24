@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const MAX_SOURCE_BYTES = 500 * 1024 * 1024;
@@ -83,13 +83,24 @@ export async function createShortsPreview({ payload, allowedHosts, dataDir }) {
   const sourcePath = path.join(outputDir, "source-video");
   const outputPath = path.join(outputDir, "preview.mp4");
   const subtitlesPath = subtitlesSrt ? path.join(outputDir, "captions.srt") : undefined;
-  await writeFile(sourcePath, bytes);
-  if (subtitlesPath) await writeFile(subtitlesPath, subtitlesSrt, "utf8");
-  const mediaDuration = Number(await run("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", sourcePath]));
-  if (!Number.isFinite(mediaDuration) || endSeconds > mediaDuration + 0.05) throw new Error("Requested clip end is beyond the source video's duration.");
-  await run("ffmpeg", buildShortsFfmpegArgs({ sourcePath, outputPath, startSeconds, endSeconds, subtitlesPath }));
-  const info = await stat(outputPath);
-  return { previewId, status: "preview_ready", durationSeconds: Number((endSeconds - startSeconds).toFixed(3)), byteLength: info.size, aspectRatio: "9:16", audio: "source audio retained; caller must confirm audio rights", published: false };
+  let completed = false;
+  try {
+    await writeFile(sourcePath, bytes);
+    if (subtitlesPath) await writeFile(subtitlesPath, subtitlesSrt, "utf8");
+    const mediaDuration = Number(await run("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", sourcePath]));
+    if (!Number.isFinite(mediaDuration) || endSeconds > mediaDuration + 0.05) throw new Error("Requested clip end is beyond the source video's duration.");
+    await run("ffmpeg", buildShortsFfmpegArgs({ sourcePath, outputPath, startSeconds, endSeconds, subtitlesPath }));
+    const info = await stat(outputPath);
+    if (!info.size) throw new Error("FFmpeg returned an empty Shorts preview.");
+    completed = true;
+    return { previewId, status: "preview_ready", durationSeconds: Number((endSeconds - startSeconds).toFixed(3)), byteLength: info.size, aspectRatio: "9:16", audio: "source audio retained; caller must confirm audio rights", published: false };
+  } finally {
+    await Promise.all([
+      rm(sourcePath, { force: true }),
+      subtitlesPath ? rm(subtitlesPath, { force: true }) : Promise.resolve(),
+      completed ? Promise.resolve() : rm(outputDir, { recursive: true, force: true }),
+    ]);
+  }
 }
 
 export async function readShortsPreview({ previewId, dataDir }) {
