@@ -102,6 +102,7 @@ jobs:
             -var="region=${{ env.REGION }}" \
             -var="bucket_name=${{ env.MEDIA_BUCKET }}" \
             -var="worker_host=youtube-mcp-server-bharat.klassyfic.workers.dev" \
+            -var="deployer_service_account=$DEPLOYER_SERVICE_ACCOUNT" \
             -var="renderer_image=placeholder"
 
       - name: Create renderer shared secret version if absent
@@ -180,6 +181,7 @@ jobs:
             -var="region=$REGION" \
             -var="bucket_name=$MEDIA_BUCKET" \
             -var="worker_host=youtube-mcp-server-bharat.klassyfic.workers.dev" \
+            -var="deployer_service_account=$DEPLOYER_SERVICE_ACCOUNT" \
             -var="renderer_image=$IMAGE"
 
       - name: Set up Node.js for Worker secret sync
