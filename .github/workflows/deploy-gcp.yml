@@ -267,7 +267,9 @@ jobs:
               message = {k: v for k, v in message.items() if k.lower() not in {"authorization", "token", "access_token"}}
           print(f"Vertex image smoke test HTTP {sys.argv[2]}: {json.dumps(message, ensure_ascii=False)[:3000]}")
           PY
-            if grep -qi "eligible paid billing account" "$tmp/image.json"; then
+            # The renderer wraps upstream Vertex 403 responses in HTTP 400 JSON. GitHub log masking can also redact
+# fragments of the billing message, so classify only the stable permission code + eligibility wording.
+          if grep -qi "PERMISSION_DENIED" "$tmp/image.json" && grep -qi "eligible" "$tmp/image.json" && grep -qi "paid" "$tmp/image.json"; then
               echo "::warning::Vertex image generation is blocked by Google billing/account eligibility. Renderer/Shorts E2E will use synthetic test frames; this does not validate live AI image generation."
               echo "E2E_USE_SYNTHETIC_IMAGES=true" >> "$GITHUB_ENV"
             else
