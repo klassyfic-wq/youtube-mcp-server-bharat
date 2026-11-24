@@ -77,6 +77,13 @@ resource "google_secret_manager_secret" "renderer_shared_secret" {
   depends_on = [google_project_service.apis]
 }
 
+resource "google_secret_manager_secret_iam_member" "deployer_secret_access" {
+  project   = var.project_id
+  secret_id = google_secret_manager_secret.renderer_shared_secret.secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${var.deployer_service_account}"
+}
+
 resource "google_secret_manager_secret_iam_member" "renderer_secret_access" {
   project   = var.project_id
   secret_id = google_secret_manager_secret.renderer_shared_secret.secret_id
