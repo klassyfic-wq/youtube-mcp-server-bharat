@@ -23,10 +23,16 @@ jobs:
           ffmpeg -version | head -n 1
           ffprobe -version | head -n 1
           test -f /usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf
+      - name: Validate production E2E shell script syntax
+        run: bash -n .github/scripts/production-e2e-render-shorts.sh
       - run: npm install --no-audit --no-fund
       - run: npx wrangler types
       - run: npm run type-check
       - run: npm test
       - uses: hashicorp/setup-terraform@v3
       - run: terraform -chdir=infra/gcp init -backend=false -input=false
+      - run: terraform -chdir=infra/gcp fmt -check -recursive
       - run: terraform -chdir=infra/gcp validate
+      - name: Validate deployment workflow YAML
+        run: |
+          ruby -e 'require "yaml"; YAML.load_file(".github/workflows/deploy-gcp.yml", aliases: true); puts "deploy-gcp.yml YAML PASS"'

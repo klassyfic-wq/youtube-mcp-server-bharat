@@ -8,6 +8,7 @@ locals {
     "artifactregistry.googleapis.com",
     "cloudbuild.googleapis.com",
     "iam.googleapis.com",
+    "iamcredentials.googleapis.com",
     "run.googleapis.com",
     "secretmanager.googleapis.com",
     "serviceusage.googleapis.com",
@@ -315,4 +316,24 @@ output "service_account_email" {
 
 output "renderer_job_name" {
   value = google_cloud_run_v2_job.renderer.name
+}
+
+# Dedicated read-only signer for short-lived production E2E source URLs.
+# The deployer can impersonate only this account; it cannot write or delete media.
+resource "google_service_account" "e2e_url_signer" {
+  project      = var.project_id
+  account_id   = "klassyfic-e2e-signer"
+  display_name = "Klassyfic production E2E signed URL reader"
+}
+
+resource "google_storage_bucket_iam_member" "e2e_url_signer_reader" {
+  bucket = google_storage_bucket.media.name
+  role   = "roles/storage.objectViewer"
+  member = "serviceAccount:${google_service_account.e2e_url_signer.email}"
+}
+
+resource "google_service_account_iam_member" "deployer_can_sign_e2e_urls" {
+  service_account_id = google_service_account.e2e_url_signer.name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = "serviceAccount:${var.deployer_service_account}"
 }
