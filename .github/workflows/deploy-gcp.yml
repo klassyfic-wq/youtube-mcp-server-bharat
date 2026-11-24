@@ -284,7 +284,14 @@ jobs:
           assert 8 < len(image) <= 6 * 1024 * 1024, f"Image size outside limit: {len(image)}"
           assert image.startswith(b"\x89PNG\r\n\x1a\n") or image.startswith(b"\xff\xd8\xff"), "Invalid PNG/JPEG signature"
           print(f"Vertex AI scene image generation: PASS ({len(image)} bytes)")
+          import os
+          output = os.path.join(os.environ["RUNNER_TEMP"], "production-e2e")
+          os.makedirs(output, exist_ok=True)
+          with open(os.path.join(output, "vertex-smoke.png"), "wb") as f:
+              f.write(image)
+          print("Saved validated Vertex scene image for reuse by the production E2E renderer.")
           PY
+          echo "E2E_VERTEX_IMAGE_PATH=$RUNNER_TEMP/production-e2e/vertex-smoke.png" >> "$GITHUB_ENV"
           fi
 
 
