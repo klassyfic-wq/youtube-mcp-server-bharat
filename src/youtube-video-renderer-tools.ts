@@ -125,7 +125,7 @@ export function registerVideoRendererTools(server:McpServer,authProps:Props|unde
       const upstream=await fetch(new URL("/v1/shorts/preview",endpoint),{method:"POST",headers:{Authorization:`Bearer ${rendererApiKey(env)}`,"Content-Type":"application/json"},body:JSON.stringify({sourceVideoUrl:input.sourceVideoUrl,startSeconds:input.startSeconds,endSeconds:input.endSeconds,subtitlesSrt:input.subtitlesSrt??""}),signal:AbortSignal.timeout(180000)});
       if(!upstream.ok)throw await rendererFailure(upstream,"Shorts renderer returned");
       const rendered=await upstream.json() as {previewId:string;status:string;durationSeconds:number;byteLength:number;aspectRatio:string};
-      if(!rendered.previewId||rendered.status!=="preview_ready")throw new Error("Renderer did not confirm a ready Shorts preview.");
+      if(!/^[0-9a-f-]{36}$/i.test(rendered.previewId)||rendered.status!=="preview_ready"||rendered.aspectRatio!=="9:16"||!Number.isFinite(rendered.durationSeconds)||rendered.durationSeconds<=0||rendered.durationSeconds>180||!Number.isInteger(rendered.byteLength)||rendered.byteLength<=0)throw new Error("Renderer returned invalid or incomplete Shorts preview metadata.");
       const token=randomToken(),expiresAt=Date.now()+10*60*1000;
       await env.OAUTH_KV.put(shortsPreviewGrantKey(token),JSON.stringify({userId,previewId:rendered.previewId,expiresAt}),{expirationTtl:600});
       const base=mediaBase(env);
