@@ -282,7 +282,7 @@ jobs:
           assert isinstance(encoded, str) and encoded, "No base64 image returned"
           image = base64.b64decode(encoded, validate=True)
           assert 8 < len(image) <= 6 * 1024 * 1024, f"Image size outside limit: {len(image)}"
-          assert image.startswith(b"\\x89PNG\\r\\n\\x1a\\n") or image.startswith(b"\\xff\\xd8\\xff"), "Invalid PNG/JPEG signature"
+          assert image.startswith(b"\x89PNG\r\n\x1a\n") or image.startswith(b"\xff\xd8\xff"), "Invalid PNG/JPEG signature"
           print(f"Vertex AI scene image generation: PASS ({len(image)} bytes)")
           PY
           fi
