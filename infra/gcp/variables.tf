@@ -20,3 +20,8 @@ variable "renderer_image" {
   type    = string
   default = "placeholder"
 }
+
+variable "deployer_service_account" {
+  type        = string
+  description = "GitHub Actions deployer service account that needs read access to sync the renderer secret."
+}
