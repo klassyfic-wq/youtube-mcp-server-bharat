@@ -24,9 +24,28 @@ gcloud secrets versions access latest \
 printf 'header = "Authorization: Bearer %s"\n' "$(cat "$TMP_DIR/renderer-secret")" > "$TMP_DIR/curl.conf"
 chmod 600 "$TMP_DIR/curl.conf"
 
-# Generate local synthetic scene images; no third-party or YouTube media is used.
-ffmpeg -hide_banner -loglevel error -y -f lavfi -i "testsrc2=size=1280x720:rate=1" -frames:v 1 "$TMP_DIR/scene-1.png"
-ffmpeg -hide_banner -loglevel error -y -f lavfi -i "smptebars=size=1280x720:rate=1" -frames:v 1 "$TMP_DIR/scene-2.png"
+# Generate two original AI scene images through the production Vertex endpoint.
+curl --config "$TMP_DIR/curl.conf" --fail-with-body --silent --show-error \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"gemini-2.5-flash-image","prompt":"Cinematic 16:9 illustration of a warm sunrise over a peaceful Indian village, lush green landscape, vibrant natural colors, professional animation background, no words, no lettering, no logos","n":1,"size":"1024x1024","response_format":"b64_json"}' \
+  "$RENDERER_URL/v1/images/generations" -o "$TMP_DIR/scene-1-image.json"
+curl --config "$TMP_DIR/curl.conf" --fail-with-body --silent --show-error \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"gemini-2.5-flash-image","prompt":"Cinematic 16:9 illustration of a curious child exploring a colorful science garden with simple glowing experiments, friendly educational animation style, rich details, no words, no lettering, no logos","n":1,"size":"1024x1024","response_format":"b64_json"}' \
+  "$RENDERER_URL/v1/images/generations" -o "$TMP_DIR/scene-2-image.json"
+python3 - "$TMP_DIR" <<'PY'
+import base64, json, pathlib, sys
+base = pathlib.Path(sys.argv[1])
+for index in (1, 2):
+    payload = json.loads((base / f"scene-{index}-image.json").read_text(encoding="utf-8"))
+    encoded = payload.get("data", [{}])[0].get("b64_json")
+    assert isinstance(encoded, str) and encoded, f"Vertex returned no image for scene {index}"
+    image = base64.b64decode(encoded, validate=True)
+    assert 1000 < len(image) <= 6 * 1024 * 1024, f"Scene {index} image size outside bounds: {len(image)}"
+    assert image.startswith(b"\\x89PNG\\r\\n\\x1a\\n") or image.startswith(b"\\xff\\xd8\\xff"), f"Scene {index} image signature invalid"
+    (base / f"scene-{index}.png").write_bytes(image)
+    print(f"Vertex AI scene {index}: PASS ({len(image)} bytes)")
+PY
 
 curl --config "$TMP_DIR/curl.conf" --fail-with-body --silent --show-error \
   -H 'Content-Type: application/json' \
