@@ -138,11 +138,16 @@ PY
 gcloud storage cp "$OUT_DIR/production-render.mp4" "gs://$MEDIA_BUCKET/$RUN_PREFIX/shorts-source.mp4" --quiet
 SOURCE_URL="$(sign_url "$RUN_PREFIX/shorts-source.mp4")"
 export SOURCE_URL
-python3 - "$TMP_DIR/shorts-request.json" "$SOURCE_URL" <<'PY'
+SHORTS_END="$(python3 -c 'import json,sys; print(min(4.0, float(json.load(open(sys.argv[1]))["format"]["duration"])-0.1))' "$OUT_DIR/render-probe.json")"
+python3 - "$TMP_DIR/shorts-request.json" "$SOURCE_URL" "$SHORTS_END" <<'PY'
 import json, sys
+end = float(sys.argv[3])
+assert end > 1.0, f"Synthetic render is too short for a Shorts preview: {end}"
+seconds = int(end)
+millis = int(round((end - seconds) * 1000))
 payload = {
-    "sourceVideoUrl": sys.argv[2], "startSeconds": 0, "endSeconds": 4,
-    "subtitlesSrt": "1\n00:00:00,000 --> 00:00:04,000\nनमस्कार! चला, शिकूया!\n"
+    "sourceVideoUrl": sys.argv[2], "startSeconds": 0, "endSeconds": end,
+    "subtitlesSrt": f"1\\n00:00:00,000 --> 00:00:{seconds:02d},{millis:03d}\\nनमस्कार! चला, शिकूया!\\n"
 }
 json.dump(payload, open(sys.argv[1], "w", encoding="utf-8"), ensure_ascii=False)
 PY
