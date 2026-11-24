@@ -42,7 +42,7 @@ for index in (1, 2):
     assert isinstance(encoded, str) and encoded, f"Vertex returned no image for scene {index}"
     image = base64.b64decode(encoded, validate=True)
     assert 1000 < len(image) <= 6 * 1024 * 1024, f"Scene {index} image size outside bounds: {len(image)}"
-    assert image.startswith(b"\\x89PNG\\r\\n\\x1a\\n") or image.startswith(b"\\xff\\xd8\\xff"), f"Scene {index} image signature invalid"
+    assert image.startswith(bytes.fromhex("89504e470d0a1a0a")) or image.startswith(bytes.fromhex("ffd8ff")), f"Scene {index} image signature invalid"
     (base / f"scene-{index}.png").write_bytes(image)
     print(f"Vertex AI scene {index}: PASS ({len(image)} bytes)")
 PY
