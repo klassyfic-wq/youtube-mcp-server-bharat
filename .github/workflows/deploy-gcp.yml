@@ -182,6 +182,87 @@ jobs:
             -var="worker_host=youtube-mcp-server-bharat.klassyfic.workers.dev" \
             -var="renderer_image=$IMAGE"
 
+      - name: Set up Node.js for Worker secret sync
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Sync renderer shared secret to Cloudflare Worker
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${CLOUDFLARE_API_TOKEN}" || -z "${CLOUDFLARE_ACCOUNT_ID}" ]]; then
+            echo "::error::Cloudflare API token/account ID secrets are required to sync the renderer credential."
+            exit 1
+          fi
+          secret_file="$(mktemp)"
+          trap 'rm -f "$secret_file"' EXIT
+          umask 077
+          gcloud secrets versions access latest \
+            --secret=klassyfic-renderer-shared-secret \
+            --project="$PROJECT_ID" > "$secret_file"
+          test -s "$secret_file"
+          npm install --no-package-lock --no-audit --no-fund
+          npx wrangler secret put TTS_API_KEY --name youtube-mcp-server-bharat < "$secret_file"
+
+      - name: Smoke test renderer health, Marathi TTS, and Vertex image generation
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          umask 077
+          gcloud secrets versions access latest \
+            --secret=klassyfic-renderer-shared-secret \
+            --project="$PROJECT_ID" > "$tmp/renderer-secret"
+          RENDERER_URL="$(gcloud run services describe klassyfic-video-renderer --region="$REGION" --project="$PROJECT_ID" --format='value(status.url)')"
+          if [[ -z "$RENDERER_URL" ]]; then
+            echo "::error::Cloud Run renderer URL was not returned."
+            exit 1
+          fi
+          printf 'header = "Authorization: Bearer %s"\n' "$(cat "$tmp/renderer-secret")" > "$tmp/curl.conf"
+          chmod 600 "$tmp/curl.conf"
+
+          curl --config "$tmp/curl.conf" --fail-with-body --silent --show-error \
+            "$RENDERER_URL/health" -o "$tmp/health.json"
+          python - "$tmp/health.json" <<'PY'
+          import json, sys
+          data = json.load(open(sys.argv[1], encoding="utf-8"))
+          assert data.get("status") == "ok", data
+          assert data.get("executionMode") == "cloud-run-jobs", data
+          print("Renderer authenticated health: PASS")
+          PY
+
+          curl --config "$tmp/curl.conf" --fail-with-body --silent --show-error \
+            -H 'Content-Type: application/json' \
+            -d '{"input":"नमस्कार! ही मराठी आवाज चाचणी आहे.","voice":"mr-IN-Chirp3-HD-Achird","response_format":"mp3"}' \
+            "$RENDERER_URL/v1/audio/speech" -o "$tmp/marathi.mp3"
+          python - "$tmp/marathi.mp3" <<'PY'
+          import os, sys
+          data = open(sys.argv[1], "rb").read()
+          assert len(data) > 1000, f"Unexpectedly small TTS output: {len(data)} bytes"
+          assert data[:3] == b"ID3" or (len(data) > 2 and data[0] == 0xff and data[1] & 0xe0 == 0xe0), "Not a valid MP3 stream"
+          print(f"Marathi Chirp 3 HD TTS: PASS ({len(data)} bytes)")
+          PY
+
+          curl --config "$tmp/curl.conf" --fail-with-body --silent --show-error \
+            -H 'Content-Type: application/json' \
+            -d '{"model":"gemini-2.5-flash-image","prompt":"A clean cinematic illustration of a colorful paper kite flying over a green field at sunrise, no text or lettering","n":1,"size":"1024x1024","response_format":"b64_json"}' \
+            "$RENDERER_URL/v1/images/generations" -o "$tmp/image.json"
+          python - "$tmp/image.json" <<'PY'
+          import base64, json, sys
+          payload = json.load(open(sys.argv[1], encoding="utf-8"))
+          encoded = payload.get("data", [{}])[0].get("b64_json")
+          assert isinstance(encoded, str) and encoded, "No base64 image returned"
+          image = base64.b64decode(encoded, validate=True)
+          assert 8 < len(image) <= 6 * 1024 * 1024, f"Image size outside limit: {len(image)}"
+          assert image.startswith(b"\x89PNG\r\n\x1a\n") or image.startswith(b"\xff\xd8\xff"), "Invalid PNG/JPEG signature"
+          print(f"Vertex AI scene image generation: PASS ({len(image)} bytes)")
+          PY
+
       - name: Report deployment outputs
         working-directory: infra/gcp
         run: |
