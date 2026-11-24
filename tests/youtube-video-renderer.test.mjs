@@ -163,7 +163,7 @@ test("authorized Shorts preview sends only reviewed source and returns private p
       sourceVideoUrl: "https://storage.googleapis.com/rights-cleared/source.mp4",
       startSeconds: 12,
       endSeconds: 42,
-      subtitlesSrt: "1\\n00:00:00,000 --> 00:00:30,000\\nनमस्कार\\n",
+      subtitlesSrt: "1\n00:00:00,000 --> 00:00:30,000\nनमस्कार\n",
       licenseMetadata: "youtube",
       creatorPermissionConfirmed: true,
       thirdPartyAudioCleared: true,
@@ -177,7 +177,9 @@ test("authorized Shorts preview sends only reviewed source and returns private p
     assert.equal(sent.endSeconds, 42);
     assert.match(sent.subtitlesSrt, /नमस्कार/);
     assert.equal(result.status, "preview_ready");
-    assert.match(result.previewUrl, /^https:\\/\\/worker\\.example\\.test\\/media\\/shorts-preview\\//);
+    const previewUrl = new URL(result.previewUrl);
+    assert.equal(previewUrl.hostname, "worker.example.test");
+    assert.match(previewUrl.pathname, /^\\/media\\/shorts-preview\\//);
     assert.match(result.rightsReview, /not independently verified/);
     assert.match(result.note, /No YouTube upload/);
     assert.equal([...kv.values.keys()].some(key => key.startsWith("youtube:shorts-preview-grant:")), true);
