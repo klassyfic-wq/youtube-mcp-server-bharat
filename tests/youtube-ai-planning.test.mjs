@@ -67,10 +67,12 @@ test("AI script and scene planner persist validated artifacts and advance the jo
     ],
   };
   let call = 0;
+  const requests = [];
   globalThis.fetch = async (url, init) => {
     assert.equal(String(url), env.AI_API_URL);
     assert.equal(new Headers(init.headers).get("Authorization"), "Bearer test-key");
     call++;
+    requests.push(JSON.parse(init.body));
     return Response.json({ choices: [{ message: { content: JSON.stringify(call === 1 ? script : scenes) } }] });
   };
 
@@ -90,6 +92,8 @@ test("AI script and scene planner persist validated artifacts and advance the jo
     assert.match(storedJob.artifacts.script, /^kv:\/\//);
     assert.match(storedJob.artifacts.scenes, /^kv:\/\//);
     assert.equal(call, 2);
+    assert.match(requests[1].messages[0].content, /Never ask the image model to render words/);
+    assert.match(requests[1].messages[0].content, /camera framing or angle/);
   } finally {
     globalThis.fetch = originalFetch;
   }

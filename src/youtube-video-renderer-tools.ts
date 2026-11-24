@@ -19,6 +19,7 @@ const imageKey = (u:string,j:string,n:number)=>`youtube:video-image:${u}:${j}:${
 const previewGrantKey = (t:string)=>`youtube:video-preview-grant:${t}`;
 const audioGrantKey = (t:string)=>`youtube:audio-download-grant:${t}`;
 const imageGrantKey = (t:string)=>`youtube:image-download-grant:${t}`;
+const shortsPreviewGrantKey = (t:string)=>`youtube:shorts-preview-grant:${t}`;
 const randomToken=()=>Array.from(crypto.getRandomValues(new Uint8Array(32)),b=>b.toString(16).padStart(2,"0")).join("");
 function formatSrtTime(seconds:number){const ms=Math.max(0,Math.round(seconds*1000));const h=Math.floor(ms/3600000),m=Math.floor(ms%3600000/60000),s=Math.floor(ms%60000/1000),milli=ms%1000;return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")},${String(milli).padStart(3,"0")}`;}
 function response(v:unknown){return{content:[{type:"text" as const,text:JSON.stringify(v,null,2)}]};}
@@ -81,7 +82,56 @@ export async function handleVideoPreviewRequest(request:Request,env:RendererEnv)
     return new Response(upstream.body,{status:200,headers:{...headers,"Content-Type":"video/mp4","Content-Disposition":`inline; filename="${grant.jobId}-preview.mp4"`,...(upstream.headers.get("content-length")?{"Content-Length":upstream.headers.get("content-length")!}:{})}});
   }catch(e){console.error("Preview proxy failed:",e instanceof Error?e.message:"unknown error");return new Response("Unable to retrieve preview.",{status:502,headers});}
 }
+export async function handleShortsPreviewRequest(request:Request,env:RendererEnv):Promise<Response>{
+  const headers={"Cache-Control":"private, no-store, max-age=0","X-Content-Type-Options":"nosniff","Referrer-Policy":"no-referrer"};
+  if(request.method!=="GET")return new Response("Method not allowed",{status:405,headers:{...headers,Allow:"GET"}});
+  const match=new URL(request.url).pathname.match(/^\/media\/shorts-preview\/([a-f0-9]{64})$/);
+  if(!match)return new Response("Not found",{status:404,headers});
+  try{
+    const raw=await env.OAUTH_KV.get(shortsPreviewGrantKey(match[1]));
+    if(!raw)return new Response("Preview link is invalid or expired.",{status:404,headers});
+    const grant=JSON.parse(raw) as {userId:string;previewId:string;expiresAt:number};
+    if(!grant.userId||!grant.previewId||grant.expiresAt<=Date.now())return new Response("Preview link is invalid or expired.",{status:404,headers});
+    const base=rendererBase(env);
+    const upstream=await fetch(new URL(`/shorts-preview/${grant.previewId}`,base),{headers:{Authorization:`Bearer ${rendererApiKey(env)}`},signal:AbortSignal.timeout(120000)});
+    if(!upstream.ok||upstream.headers.get("content-type")!=="video/mp4")return new Response("Shorts preview is unavailable.",{status:502,headers});
+    return new Response(upstream.body,{status:200,headers:{...headers,"Content-Type":"video/mp4","Content-Disposition":`inline; filename="shorts-${grant.previewId}.mp4"`,...(upstream.headers.get("content-length")?{"Content-Length":upstream.headers.get("content-length")!}:{})}});
+  }catch(error){console.error("Shorts preview proxy failed:",error instanceof Error?error.message:"unknown error");return new Response("Unable to retrieve Shorts preview.",{status:502,headers});}
+}
 export function registerVideoRendererTools(server:McpServer,authProps:Props|undefined,env:RendererEnv){
+  server.registerTool("render_authorized_shorts_preview",{
+    description:"Create a private 9:16 Shorts preview from an authorized source video URL. Requires explicit rights attestations and human review confirmation. The source host must be in the renderer ASSET_HOST_ALLOWLIST. Clips are limited to 180 seconds. No YouTube download, upload, or publishing is performed.",
+    inputSchema:{
+      sourceVideoUrl:z.string().url().max(2048),
+      startSeconds:z.number().finite().min(0),
+      endSeconds:z.number().finite().positive().max(86400),
+      subtitlesSrt:z.string().max(200000).optional(),
+      licenseMetadata:z.enum(["creativeCommon","youtube","unknown"]),
+      creatorPermissionConfirmed:z.boolean(),
+      thirdPartyAudioCleared:z.boolean(),
+      thirdPartyVisualsCleared:z.boolean(),
+      attributionPlan:z.string().max(2000).default(""),
+      authorizedSourceFileProvided:z.boolean(),
+      humanReviewConfirmed:z.boolean().describe("Confirm a human reviewed the source and supporting rights evidence."),
+    },
+  },async(input)=>{
+    try{
+      const userId=authProps?.userId;if(!userId)throw new Error("Authentication required.");
+      if(input.endSeconds<=input.startSeconds||input.endSeconds-input.startSeconds>180)throw new Error("Clip duration must be positive and no longer than 180 seconds.");
+      if(input.licenseMetadata!=="creativeCommon"&&!input.creatorPermissionConfirmed)throw new Error("Documented creator/rightsholder permission is required for standard or unknown licence.");
+      if(input.licenseMetadata==="creativeCommon"&&!input.attributionPlan.trim())throw new Error("An attribution plan is required for Creative Commons sources.");
+      if(!input.thirdPartyAudioCleared||!input.thirdPartyVisualsCleared||!input.authorizedSourceFileProvided||!input.humanReviewConfirmed)throw new Error("Rights gate blocked preview: audio, visuals, authorized source file, and human review must all be confirmed.");
+      const endpoint=rendererBase(env);
+      const upstream=await fetch(new URL("/v1/shorts/preview",endpoint),{method:"POST",headers:{Authorization:`Bearer ${rendererApiKey(env)}`,"Content-Type":"application/json"},body:JSON.stringify({sourceVideoUrl:input.sourceVideoUrl,startSeconds:input.startSeconds,endSeconds:input.endSeconds,subtitlesSrt:input.subtitlesSrt??""}),signal:AbortSignal.timeout(180000)});
+      if(!upstream.ok)throw await rendererFailure(upstream,"Shorts renderer returned");
+      const rendered=await upstream.json() as {previewId:string;status:string;durationSeconds:number;byteLength:number;aspectRatio:string};
+      if(!rendered.previewId||rendered.status!=="preview_ready")throw new Error("Renderer did not confirm a ready Shorts preview.");
+      const token=randomToken(),expiresAt=Date.now()+10*60*1000;
+      await env.OAUTH_KV.put(shortsPreviewGrantKey(token),JSON.stringify({userId,previewId:rendered.previewId,expiresAt}),{expirationTtl:600});
+      const base=mediaBase(env);
+      return response({...rendered,previewUrl:new URL(`/media/shorts-preview/${token}`,base).toString(),expiresAt:new Date(expiresAt).toISOString(),rightsReview:"User attestations and human review confirmation; not independently verified legal clearance.",note:"Private preview only. No YouTube upload or publishing occurred."});
+    }catch(error){return failure(error);}
+  });
   server.registerTool("render_video_preview",{
     description:"Send a complete scene manifest and short-lived private audio/image links to the configured external FFmpeg renderer. Creates a preview only; it does not upload or publish to YouTube.",
     inputSchema:{jobId:z.string().uuid(),sceneNumber:z.number().int().positive().optional()},

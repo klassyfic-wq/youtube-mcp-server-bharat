@@ -1,6 +1,7 @@
 import http from "node:http";
 import { generateVertexImage, synthesizeCloudSpeech } from "./google-media.mjs";
-import { buildSceneVideoFilter } from "./video-effects.mjs";
+import { buildSceneJoinArgs, buildSceneVideoFilter } from "./video-effects.mjs";
+import { createShortsPreview, readShortsPreview } from "./shorts-preview.mjs";
 import { spawn } from "node:child_process";
 import { mkdtemp, mkdir, readFile, rm, writeFile, stat, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -309,10 +310,13 @@ async function render(jobId, manifest, edits = {}) {
       await run("ffmpeg", ["-y","-loop","1","-framerate","30","-i",image,"-i",audio,"-t",String(durationForScene),"-vf",videoFilter,"-af",`apad,atrim=duration=${durationForScene}`,"-c:v","libx264","-preset","veryfast","-pix_fmt","yuv420p","-c:a","aac","-b:a","192k","-ar","48000","-movflags","+faststart","-shortest",clip]);
       clips.push(clip);
     }
-    const list = path.join(work, "concat.txt");
-    await writeFile(list, clips.map(p => `file '${p.replaceAll("'","'\\''")}'`).join("\n"));
     const rawVideo = path.join(work, "joined.mp4");
-    await run("ffmpeg", ["-y","-f","concat","-safe","0","-i",list,"-c","copy",rawVideo]);
+    await run("ffmpeg", buildSceneJoinArgs({
+      clipPaths: clips,
+      durations: actualDurations,
+      transitions: tracks.map(track => track.transition ?? "cut"),
+      outputPath: rawVideo,
+    }));
     const subtitle = path.join(work, "subtitles.srt");
     await writeFile(subtitle, edits.subtitleSrt ?? buildTimedSubtitles(tracks, actualDurations), "utf8");
     const output = path.join(finalDir, "preview.mp4");
@@ -362,6 +366,17 @@ const app = http.createServer(async (req,res) => {
       console.info(JSON.stringify({ event: "tts_request_succeeded", requestId, audioBytes: audio.length }));
       res.writeHead(200, { "content-type": "audio/mpeg", "content-length": audio.length, "cache-control": "no-store", "x-content-type-options": "nosniff", "x-request-id": requestId });
       return res.end(audio);
+    }
+    if (req.method === "POST" && url.pathname === "/v1/shorts/preview") {
+      const payload = await body(req, 256 * 1024);
+      const preview = await createShortsPreview({ payload, allowedHosts: ALLOWED_HOSTS, dataDir: DATA_DIR });
+      return send(res, 200, preview);
+    }
+    const shortsPreviewMatch = url.pathname.match(/^\/shorts-preview\/([0-9a-f-]{36})$/i);
+    if (req.method === "GET" && shortsPreviewMatch) {
+      const preview = await readShortsPreview({ previewId: shortsPreviewMatch[1], dataDir: DATA_DIR });
+      res.writeHead(200, { "content-type": "video/mp4", "content-length": preview.byteLength, "cache-control": "private, no-store", "x-content-type-options": "nosniff", "content-disposition": `inline; filename="shorts-${shortsPreviewMatch[1]}.mp4"` });
+      return res.end(preview.bytes);
     }
     if (req.method === "POST" && url.pathname === "/render") {
       const payload = await body(req);
