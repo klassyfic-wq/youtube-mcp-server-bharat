@@ -318,7 +318,6 @@ output "renderer_job_name" {
   value = google_cloud_run_v2_job.renderer.name
 }
 
-
 # Dedicated read-only signer for short-lived production E2E source URLs.
 # The deployer can impersonate only this account; it cannot write or delete media.
 resource "google_service_account" "e2e_url_signer" {
