@@ -51,9 +51,32 @@ export async function createShortsPreview({ payload, allowedHosts, dataDir }) {
   const contentType = (response.headers.get("content-type") || "").split(";")[0].toLowerCase();
   if (!["video/mp4", "video/webm", "video/quicktime", "application/octet-stream"].includes(contentType)) throw new Error("Source URL did not return an accepted video content type.");
   const declaredLength = Number(response.headers.get("content-length") || 0);
-  if (declaredLength > MAX_SOURCE_BYTES) throw new Error("Source video exceeds the 500 MB size limit.");
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  if (!bytes.length || bytes.length > MAX_SOURCE_BYTES) throw new Error("Source video is empty or exceeds the 500 MB size limit.");
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_SOURCE_BYTES) throw new Error("Source video exceeds the 500 MB size limit.");
+  if (!response.body) throw new Error("Source video response has no readable body.");
+  const reader = response.body.getReader();
+  const chunks = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      totalBytes += value.byteLength;
+      if (totalBytes > MAX_SOURCE_BYTES) {
+        await reader.cancel();
+        throw new Error("Source video exceeds the 500 MB size limit.");
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  if (!totalBytes) throw new Error("Source video is empty or exceeds the 500 MB size limit.");
+  const bytes = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
   const previewId = randomUUID();
   const outputDir = path.resolve(dataDir, "shorts", previewId);
   await mkdir(outputDir, { recursive: true });
