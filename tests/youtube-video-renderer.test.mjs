@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { registerVideoRendererTools, handleVideoPreviewRequest } from "../src/youtube-video-renderer-tools.ts";
+import { registerVideoRendererTools, handleVideoPreviewRequest, handleShortsPreviewRequest } from "../src/youtube-video-renderer-tools.ts";
 
 function fakeServer(){const handlers=new Map();return{handlers,registerTool(name,_config,handler){handlers.set(name,handler);}};}
 function fakeKv(){const values=new Map();return{values,async get(k){return values.get(k)??null;},async put(k,v){values.set(k,v);}};}
@@ -146,17 +146,22 @@ test("authorized Shorts preview sends only reviewed source and returns private p
   globalThis.fetch = async (url, init) => {
     const target = new URL(url);
     assert.equal(target.origin, env.RENDERER_API_URL);
-    assert.equal(target.pathname, "/v1/shorts/preview");
     assert.equal(new Headers(init.headers).get("Authorization"), "Bearer renderer-secret");
-    sent = JSON.parse(init.body);
-    return new Response(JSON.stringify({
-      previewId: "0a7e8d3f-3a12-4b7d-8f41-5e4a2d9c0b11",
-      status: "preview_ready",
-      durationSeconds: 30,
-      byteLength: 45678,
-      aspectRatio: "9:16",
-      published: false,
-    }), { status: 200, headers: { "content-type": "application/json" } });
+    if (target.pathname === "/v1/shorts/preview") {
+      sent = JSON.parse(init.body);
+      return new Response(JSON.stringify({
+        previewId: "0a7e8d3f-3a12-4b7d-8f41-5e4a2d9c0b11",
+        status: "preview_ready",
+        durationSeconds: 30,
+        byteLength: 45678,
+        aspectRatio: "9:16",
+        published: false,
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    if (target.pathname === "/shorts-preview/0a7e8d3f-3a12-4b7d-8f41-5e4a2d9c0b11") {
+      return new Response(new Uint8Array([0, 0, 0, 1]), { status: 200, headers: { "content-type": "video/mp4" } });
+    }
+    throw new Error("Unexpected Shorts renderer path: " + target.pathname);
   };
   try {
     const result = parse(await server.handlers.get("render_authorized_shorts_preview")({
@@ -183,5 +188,9 @@ test("authorized Shorts preview sends only reviewed source and returns private p
     assert.match(result.rightsReview, /not independently verified/);
     assert.match(result.note, /No YouTube upload/);
     assert.equal([...kv.values.keys()].some(key => key.startsWith("youtube:shorts-preview-grant:")), true);
+    const playback = await handleShortsPreviewRequest(new Request(result.previewUrl), { ...env, OAUTH_KV: kv });
+    assert.equal(playback.status, 200);
+    assert.equal(playback.headers.get("content-type"), "video/mp4");
+    assert.match(playback.headers.get("cache-control"), /private, no-store/);
   } finally { globalThis.fetch = originalFetch; }
 });
