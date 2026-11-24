@@ -51,7 +51,7 @@ def make_png(path, variant):
                 rgb = land if y > hill else tuple(min(255,c+35) for c in land)
             row.extend(rgb)
         rows.append(bytes(row))
-    data = b"\\x89PNG\\r\\n\\x1a\\n"
+    data = b"\x89PNG\r\n\x1a\n"
     data += chunk(b"IHDR", struct.pack(">2I5B",W,H,8,2,0,0,0))
     data += chunk(b"IDAT", zlib.compress(b"".join(rows),6)) + chunk(b"IEND",b"")
     path.write_bytes(data)
