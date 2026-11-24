@@ -138,7 +138,7 @@ fi
 
 curl --config "$TMP_DIR/curl.conf" --fail-with-body --silent --show-error \
   "$RENDERER_URL/preview/$JOB_ID" -o "$OUT_DIR/production-render.mp4"
-ffprobe -v error -show_entries stream=codec_type,width,height -show_entries format=duration \
+ffprobe -v error -show_entries stream=codec_type,width,height,duration -show_entries format=duration \
   -of json "$OUT_DIR/production-render.mp4" > "$OUT_DIR/render-probe.json"
 ffmpeg -hide_banner -v error -i "$OUT_DIR/production-render.mp4" -f null -
 python3 - "$OUT_DIR/render-probe.json" <<'PY'
@@ -149,6 +149,7 @@ video = next((s for s in streams if s.get("codec_type") == "video"), None)
 audio = next((s for s in streams if s.get("codec_type") == "audio"), None)
 assert video and (video.get("width"), video.get("height")) == (1920, 1080), video
 assert audio, "Rendered MP4 has no audio stream"
+assert abs(float(video["duration"]) - float(audio["duration"])) < 0.75, (video, audio)
 assert float(data["format"]["duration"]) > 2, data
 print("Production MP4 playback/decode, 1920x1080 video and audio: PASS")
 PY
@@ -177,7 +178,7 @@ SHORTS_ID="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["pr
 printf 'E2E_SHORTS_ID=%s\n' "$SHORTS_ID" >> "$GITHUB_ENV"
 curl --config "$TMP_DIR/curl.conf" --fail-with-body --silent --show-error \
   "$RENDERER_URL/shorts-preview/$SHORTS_ID" -o "$OUT_DIR/production-shorts.mp4"
-ffprobe -v error -show_entries stream=codec_type,width,height -show_entries format=duration \
+ffprobe -v error -show_entries stream=codec_type,width,height,duration -show_entries format=duration \
   -of json "$OUT_DIR/production-shorts.mp4" > "$OUT_DIR/shorts-probe.json"
 ffmpeg -hide_banner -v error -i "$OUT_DIR/production-shorts.mp4" -f null -
 python3 - "$OUT_DIR/shorts-probe.json" "$TMP_DIR/shorts-response.json" <<'PY'
@@ -189,6 +190,7 @@ video = next((s for s in streams if s.get("codec_type") == "video"), None)
 audio = next((s for s in streams if s.get("codec_type") == "audio"), None)
 assert video and (video.get("width"), video.get("height")) == (1080, 1920), video
 assert audio, "Shorts preview has no retained source audio"
+assert abs(float(video["duration"]) - float(audio["duration"])) < 0.75, (video, audio)
 assert result.get("status") == "preview_ready" and result.get("aspectRatio") == "9:16", result
 assert result.get("published") is False, result
 print("Production Shorts preview 1080x1920, retained audio, subtitle render and playback: PASS")
