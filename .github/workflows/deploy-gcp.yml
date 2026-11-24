@@ -284,6 +284,7 @@ jobs:
           set -euo pipefail
           RENDERER_URL="$(gcloud run services describe klassyfic-video-renderer --region="$REGION" --project="$PROJECT_ID" --format='value(status.url)')"
           test -n "$RENDERER_URL"
+          export RENDERER_URL
           .github/scripts/production-e2e-render-shorts.sh
 
       - name: Upload production E2E preview videos and diagnostics
