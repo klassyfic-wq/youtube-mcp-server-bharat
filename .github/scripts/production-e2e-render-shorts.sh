@@ -143,8 +143,8 @@ python3 - "$TMP_DIR/shorts-request.json" "$SOURCE_URL" "$SHORTS_END" <<'PY'
 import json, sys
 end = float(sys.argv[3])
 assert end > 1.0, f"Synthetic render is too short for a Shorts preview: {end}"
-seconds = int(end)
-millis = int(round((end - seconds) * 1000))
+total_ms = int(round(end * 1000))
+seconds, millis = divmod(total_ms, 1000)
 payload = {
     "sourceVideoUrl": sys.argv[2], "startSeconds": 0, "endSeconds": end,
     "subtitlesSrt": f"1\\n00:00:00,000 --> 00:00:{seconds:02d},{millis:03d}\\nनमस्कार! चला, शिकूया!\\n"
