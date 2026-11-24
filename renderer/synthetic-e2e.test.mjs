@@ -128,8 +128,9 @@ test("synthetic HTTP-to-FFmpeg render produces a playable MP4 with synchronized 
   let status;
   for (let attempt = 0; attempt < 240; attempt++) {
     const response = await fetch(`${base}/jobs/${jobId}`, { headers });
-    assert.equal(response.status, 200, await response.text());
-    status = await response.json();
+    const responseBody = await response.text();
+    assert.equal(response.status, 200, responseBody);
+    status = JSON.parse(responseBody);
     if (status.status === "preview_ready" || status.status === "failed") break;
     await new Promise(resolve => setTimeout(resolve, 250));
   }
