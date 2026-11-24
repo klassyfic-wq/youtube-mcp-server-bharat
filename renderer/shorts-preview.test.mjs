@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildShortsFfmpegArgs, validateShortsPreviewRequest } from "./shorts-preview.mjs";
+import { buildShortsFfmpegArgs, createShortsPreview, validateShortsPreviewRequest } from "./shorts-preview.mjs";
 
 const hosts = new Set(["storage.googleapis.com"]);
 
@@ -18,4 +18,32 @@ test("builds vertical 9:16 FFmpeg crop and optional subtitle overlay while retai
   assert.ok(args.includes("scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1,subtitles=/tmp/captions.srt"));
   assert.ok(args.includes("160k"));
   assert.ok(args.includes("30"));
+});
+
+
+test("rejects an oversized source before buffering or writing it", async () => {
+  const originalFetch = globalThis.fetch;
+  let fetchOptions;
+  globalThis.fetch = async (_url, options) => {
+    fetchOptions = options;
+    return new Response("oversized", {
+      status: 200,
+      headers: {
+        "content-type": "video/mp4",
+        "content-length": String(500 * 1024 * 1024 + 1),
+      },
+    });
+  };
+  try {
+    await assert.rejects(createShortsPreview({
+      payload: {
+        sourceVideoUrl: "https://storage.googleapis.com/bucket/large.mp4",
+        startSeconds: 0,
+        endSeconds: 30,
+      },
+      allowedHosts: hosts,
+      dataDir: "/tmp/shorts-preview-size-test",
+    }), /500 MB size limit/);
+    assert.equal(fetchOptions.redirect, "error");
+  } finally { globalThis.fetch = originalFetch; }
 });

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { registerVideoRendererTools, handleVideoPreviewRequest } from "../src/youtube-video-renderer-tools.ts";
+import { registerVideoRendererTools, handleVideoPreviewRequest, handleShortsPreviewRequest } from "../src/youtube-video-renderer-tools.ts";
 
 function fakeServer(){const handlers=new Map();return{handlers,registerTool(name,_config,handler){handlers.set(name,handler);}};}
 function fakeKv(){const values=new Map();return{values,async get(k){return values.get(k)??null;},async put(k,v){values.set(k,v);}};}
@@ -107,5 +107,90 @@ test("renderer reuses the existing TTS endpoint and shared bearer secret", async
     assert.equal(queued.status, "queued");
     assert.equal(target.origin, "https://renderer.example.test");
     assert.equal(target.pathname, "/render");
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+
+test("authorized Shorts preview blocks missing human review before calling renderer", async () => {
+  const kv = fakeKv();
+  const server = fakeServer();
+  registerVideoRendererTools(server, auth, { ...env, OAUTH_KV: kv });
+  const originalFetch = globalThis.fetch;
+  let called = false;
+  globalThis.fetch = async () => { called = true; throw new Error("renderer must not be called"); };
+  try {
+    const result = await server.handlers.get("render_authorized_shorts_preview")({
+      sourceVideoUrl: "https://storage.googleapis.com/rights-cleared/source.mp4",
+      startSeconds: 12,
+      endSeconds: 42,
+      licenseMetadata: "youtube",
+      creatorPermissionConfirmed: true,
+      thirdPartyAudioCleared: true,
+      thirdPartyVisualsCleared: true,
+      attributionPlan: "",
+      authorizedSourceFileProvided: true,
+      humanReviewConfirmed: false,
+    });
+    assert.equal(result.isError, true);
+    assert.match(result.content[0].text, /human review/);
+    assert.equal(called, false);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("authorized Shorts preview sends only reviewed source and returns private preview link", async () => {
+  const kv = fakeKv();
+  const server = fakeServer();
+  registerVideoRendererTools(server, auth, { ...env, OAUTH_KV: kv });
+  const originalFetch = globalThis.fetch;
+  let sent;
+  globalThis.fetch = async (url, init) => {
+    const target = new URL(url);
+    assert.equal(target.origin, env.RENDERER_API_URL);
+    assert.equal(new Headers(init.headers).get("Authorization"), "Bearer renderer-secret");
+    if (target.pathname === "/v1/shorts/preview") {
+      sent = JSON.parse(init.body);
+      return new Response(JSON.stringify({
+        previewId: "0a7e8d3f-3a12-4b7d-8f41-5e4a2d9c0b11",
+        status: "preview_ready",
+        durationSeconds: 30,
+        byteLength: 45678,
+        aspectRatio: "9:16",
+        published: false,
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    if (target.pathname === "/shorts-preview/0a7e8d3f-3a12-4b7d-8f41-5e4a2d9c0b11") {
+      return new Response(new Uint8Array([0, 0, 0, 1]), { status: 200, headers: { "content-type": "video/mp4" } });
+    }
+    throw new Error("Unexpected Shorts renderer path: " + target.pathname);
+  };
+  try {
+    const result = parse(await server.handlers.get("render_authorized_shorts_preview")({
+      sourceVideoUrl: "https://storage.googleapis.com/rights-cleared/source.mp4",
+      startSeconds: 12,
+      endSeconds: 42,
+      subtitlesSrt: "1\n00:00:00,000 --> 00:00:30,000\nनमस्कार\n",
+      licenseMetadata: "youtube",
+      creatorPermissionConfirmed: true,
+      thirdPartyAudioCleared: true,
+      thirdPartyVisualsCleared: true,
+      attributionPlan: "",
+      authorizedSourceFileProvided: true,
+      humanReviewConfirmed: true,
+    }));
+    assert.equal(sent.sourceVideoUrl, "https://storage.googleapis.com/rights-cleared/source.mp4");
+    assert.equal(sent.startSeconds, 12);
+    assert.equal(sent.endSeconds, 42);
+    assert.match(sent.subtitlesSrt, /नमस्कार/);
+    assert.equal(result.status, "preview_ready");
+    const previewUrl = new URL(result.previewUrl);
+    assert.equal(previewUrl.hostname, "worker.example.test");
+    assert.equal(previewUrl.pathname.startsWith("/media/shorts-preview/"), true);
+    assert.match(result.rightsReview, /not independently verified/);
+    assert.match(result.note, /No YouTube upload/);
+    assert.equal([...kv.values.keys()].some(key => key.startsWith("youtube:shorts-preview-grant:")), true);
+    const playback = await handleShortsPreviewRequest(new Request(result.previewUrl), { ...env, OAUTH_KV: kv });
+    assert.equal(playback.status, 200);
+    assert.equal(playback.headers.get("content-type"), "video/mp4");
+    assert.match(playback.headers.get("cache-control"), /private, no-store/);
   } finally { globalThis.fetch = originalFetch; }
 });

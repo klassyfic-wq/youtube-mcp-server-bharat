@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const MAX_SOURCE_BYTES = 500 * 1024 * 1024;
@@ -51,24 +51,56 @@ export async function createShortsPreview({ payload, allowedHosts, dataDir }) {
   const contentType = (response.headers.get("content-type") || "").split(";")[0].toLowerCase();
   if (!["video/mp4", "video/webm", "video/quicktime", "application/octet-stream"].includes(contentType)) throw new Error("Source URL did not return an accepted video content type.");
   const declaredLength = Number(response.headers.get("content-length") || 0);
-  if (declaredLength > MAX_SOURCE_BYTES) throw new Error("Source video exceeds the 500 MB size limit.");
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  if (!bytes.length || bytes.length > MAX_SOURCE_BYTES) throw new Error("Source video is empty or exceeds the 500 MB size limit.");
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_SOURCE_BYTES) throw new Error("Source video exceeds the 500 MB size limit.");
+  if (!response.body) throw new Error("Source video response has no readable body.");
+
   const previewId = randomUUID();
   const outputDir = path.resolve(dataDir, "shorts", previewId);
   await mkdir(outputDir, { recursive: true });
   const sourcePath = path.join(outputDir, "source-video");
   const outputPath = path.join(outputDir, "preview.mp4");
   const subtitlesPath = subtitlesSrt ? path.join(outputDir, "captions.srt") : undefined;
-  await writeFile(sourcePath, bytes);
-  if (subtitlesPath) await writeFile(subtitlesPath, subtitlesSrt, "utf8");
-  const mediaDuration = Number(await run("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", sourcePath]));
-  if (!Number.isFinite(mediaDuration) || endSeconds > mediaDuration + 0.05) throw new Error("Requested clip end is beyond the source video's duration.");
-  await run("ffmpeg", buildShortsFfmpegArgs({ sourcePath, outputPath, startSeconds, endSeconds, subtitlesPath }));
-  const info = await stat(outputPath);
-  return { previewId, status: "preview_ready", durationSeconds: Number((endSeconds - startSeconds).toFixed(3)), byteLength: info.size, aspectRatio: "9:16", audio: "source audio retained; caller must confirm audio rights", published: false };
+  let completed = false;
+  try {
+    const sourceFile = await open(sourcePath, "w");
+    let totalBytes = 0;
+    try {
+      const reader = response.body.getReader();
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          totalBytes += value.byteLength;
+          if (totalBytes > MAX_SOURCE_BYTES) {
+            await reader.cancel();
+            throw new Error("Source video exceeds the 500 MB size limit.");
+          }
+          await sourceFile.writeFile(value);
+        }
+      } finally {
+        reader.releaseLock();
+      }
+    } finally {
+      await sourceFile.close();
+    }
+    if (!totalBytes) throw new Error("Source video is empty.");
+    if (declaredLength > 0 && totalBytes !== declaredLength) throw new Error("Downloaded source size does not match its Content-Length.");
+    if (subtitlesPath) await writeFile(subtitlesPath, subtitlesSrt, "utf8");
+    const mediaDuration = Number(await run("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", sourcePath]));
+    if (!Number.isFinite(mediaDuration) || endSeconds > mediaDuration + 0.05) throw new Error("Requested clip end is beyond the source video's duration.");
+    await run("ffmpeg", buildShortsFfmpegArgs({ sourcePath, outputPath, startSeconds, endSeconds, subtitlesPath }));
+    const info = await stat(outputPath);
+    if (!info.size) throw new Error("FFmpeg returned an empty Shorts preview.");
+    completed = true;
+    return { previewId, status: "preview_ready", durationSeconds: Number((endSeconds - startSeconds).toFixed(3)), byteLength: info.size, aspectRatio: "9:16", audio: "source audio retained; caller must confirm audio rights", published: false };
+  } finally {
+    await Promise.all([
+      rm(sourcePath, { force: true }),
+      subtitlesPath ? rm(subtitlesPath, { force: true }) : Promise.resolve(),
+      completed ? Promise.resolve() : rm(outputDir, { recursive: true, force: true }),
+    ]);
+  }
 }
-
 export async function readShortsPreview({ previewId, dataDir }) {
   if (!/^[0-9a-f-]{36}$/i.test(previewId)) throw new Error("Invalid Shorts preview ID.");
   const filePath = path.resolve(dataDir, "shorts", previewId, "preview.mp4");

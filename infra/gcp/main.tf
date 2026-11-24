@@ -157,7 +157,7 @@ resource "google_cloud_run_v2_job" "renderer" {
         }
         env {
           name  = "ASSET_HOST_ALLOWLIST"
-          value = var.worker_host
+          value = "${var.worker_host},storage.googleapis.com"
         }
         env {
           name  = "VERTEX_AI_LOCATION"
@@ -257,7 +257,7 @@ resource "google_cloud_run_v2_service" "renderer" {
       }
       env {
         name  = "ASSET_HOST_ALLOWLIST"
-        value = var.worker_host
+        value = "${var.worker_host},storage.googleapis.com"
       }
       env {
         name = "RENDERER_SHARED_SECRET"
