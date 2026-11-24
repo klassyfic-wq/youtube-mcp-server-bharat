@@ -37,9 +37,31 @@ test("standard licence requires creator permission and all source-rights attesta
     thirdPartyVisualsCleared: true,
     attributionPlan: "",
     authorizedSourceFileProvided: true,
+    humanReviewConfirmed: false,
   });
   const data = JSON.parse(response.content[0].text);
   assert.equal(data.decision, "attestations_complete_pending_human_review");
   assert.equal(data.mayProceedToShortsPreview, false);
+  assert.match(data.blockers[0], /Human review/);
+});
+
+
+test("all rights attestations plus human review approve preview but do not publish", async () => {
+  const server = fakeServer();
+  registerYoutubeShortsRightsTools(server);
+  const response = await server.handlers.get("evaluate_short_source_rights")({
+    videoId: "abcdefghijk",
+    licenseMetadata: "youtube",
+    creatorPermissionConfirmed: true,
+    thirdPartyAudioCleared: true,
+    thirdPartyVisualsCleared: true,
+    attributionPlan: "",
+    authorizedSourceFileProvided: true,
+    humanReviewConfirmed: true,
+  });
+  const data = JSON.parse(response.content[0].text);
+  assert.equal(data.decision, "approved_for_preview");
+  assert.equal(data.mayProceedToShortsPreview, true);
   assert.deepEqual(data.blockers, []);
+  assert.match(data.nextAction, /render_authorized_shorts_preview/);
 });
