@@ -15,8 +15,22 @@ const ClipSchema = z.object({
     hook: z.string().trim().min(1).max(240),
     title: z.string().trim().min(1).max(100),
     reason: z.string().trim().min(1).max(500),
-  })).min(1).max(20),
+  })).min(1).max(10),
 });
+
+function transcriptTimestamps(transcript: string): number[] {
+  const timestamps: number[] = [];
+  const pattern = /\[(\d{1,2}):([0-5]\d)(?::([0-5]\d))?(?:[,.](\d{1,3}))?\]/g;
+  for (const match of transcript.matchAll(pattern)) {
+    const hasHours = match[3] !== undefined;
+    const hours = hasHours ? Number(match[1]) : 0;
+    const minutes = hasHours ? Number(match[2]) : Number(match[1]);
+    const seconds = hasHours ? Number(match[3]) : Number(match[2]);
+    const millis = match[4] ? Number(match[4].padEnd(3, "0")) : 0;
+    timestamps.push(hours * 3600 + minutes * 60 + seconds + millis / 1000);
+  }
+  return timestamps;
+}
 
 function result(value: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }] };
@@ -45,6 +59,16 @@ async function analyzeTranscript(env: ShortsEnv, input: {
   videoDurationSeconds: number;
   transcript: string;
 }) {
+  const timestamps = transcriptTimestamps(input.transcript);
+  if (timestamps.length < 2) {
+    throw new Error("Transcript must contain at least two bracketed timestamps such as [00:00:05] and [00:00:18].");
+  }
+  if (timestamps.some((value, index) => index > 0 && value < timestamps[index - 1])) {
+    throw new Error("Transcript timestamps must be in chronological order.");
+  }
+  if (timestamps.at(-1)! > input.videoDurationSeconds + 1) {
+    throw new Error("Transcript contains a timestamp beyond the supplied video duration.");
+  }
   if (!env.AI_API_URL || !env.AI_API_KEY || !env.AI_MODEL) {
     throw new Error("AI provider is not configured. Set AI_API_URL, AI_API_KEY, and AI_MODEL. No paid provider was called.");
   }
@@ -189,6 +213,12 @@ export function registerYoutubeShortsDiscoveryTools(server: McpServer, env: Shor
           videoTitle: input.videoTitle,
           clipCount: analysis.clips.length,
           clips: analysis.clips,
+          transcriptTiming: {
+            timestampCount: transcriptTimestamps(input.transcript).length,
+            firstTimestampSeconds: transcriptTimestamps(input.transcript)[0],
+            lastTimestampSeconds: transcriptTimestamps(input.transcript).at(-1),
+            validatedAgainstVideoDuration: true,
+          },
           rightsStatus: "not_assessed",
           nextAction: "Review clip context and rights. Actual footage editing requires an authorized source file supplied by the rights holder or another permitted source.",
           note: "Transcript analysis only; no source video was downloaded, no media was generated, and nothing was published.",
