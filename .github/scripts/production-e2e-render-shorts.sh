@@ -147,6 +147,15 @@ for attempt in $(seq 1 90); do
   if [[ "$STATUS" == "preview_ready" ]]; then ready=1; break; fi
   if [[ "$STATUS" == "failed" || "$STATUS" == "dispatch_unknown" ]]; then
     cat "$TMP_DIR/render-status.json"
+    EXECUTION_NAME="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("executionName",""))' "$TMP_DIR/render-status.json")"
+    if [[ -n "$EXECUTION_NAME" ]]; then
+      EXECUTION_ID="${EXECUTION_NAME##*/}"
+      echo "Cloud Run execution diagnostics for $EXECUTION_ID:"
+      gcloud logging read \
+        "resource.type=cloud_run_job AND resource.labels.job_name=klassyfic-video-renderer-job AND labels.\"run.googleapis.com/execution_name\"=\"$EXECUTION_ID\"" \
+        --project="$PROJECT_ID" --freshness=2h --limit=40 \
+        --format='value(timestamp,severity,textPayload,jsonPayload.message)' || echo "::warning::Could not read Cloud Run execution logs."
+    fi
     echo "::error::Production render ended with status $STATUS"
     exit 1
   fi

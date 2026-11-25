@@ -62,13 +62,21 @@ async function reconcileCloudRunExecution(jobId, record) {
     ["CONDITION_SUCCEEDED", "CONDITION_FAILED"].includes(completedCondition?.state);
   if (!terminal) return record;
   const succeeded = completedCondition?.state === "CONDITION_SUCCEEDED";
+  const conditionDetails = conditions
+    .filter(condition => condition.message || condition.reason)
+    .map(condition => ({ type: condition.type, state: condition.state, reason: condition.reason || null, message: condition.message || null }));
   const next = {
     ...record,
     status: "failed",
-    error: succeeded
-      ? "Cloud Run execution succeeded but no preview result was persisted; verify shared-volume consistency."
-      : "Cloud Run execution failed or was cancelled before a preview result was persisted.",
+    // The worker writes its precise render error before exiting non-zero.
+    // Preserve it instead of replacing it with a generic execution message.
+    error: record.status === "failed" && record.error
+      ? record.error
+      : succeeded
+        ? "Cloud Run execution succeeded but no preview result was persisted; verify shared-volume consistency."
+        : "Cloud Run execution failed or was cancelled before a preview result was persisted.",
     executionState: succeeded ? "succeeded" : "failed",
+    executionConditions: conditionDetails,
     updatedAt: new Date().toISOString()
   };
   await persistJob(jobId, next);
