@@ -337,3 +337,22 @@ resource "google_service_account_iam_member" "deployer_can_sign_e2e_urls" {
   role               = "roles/iam.serviceAccountTokenCreator"
   member             = "serviceAccount:${var.deployer_service_account}"
 }
+
+# Allow CI to read only Cloud Logging entries needed to diagnose Cloud Run E2E jobs.
+# This is intentionally narrower than project-wide roles/logging.viewer.
+resource "google_project_iam_custom_role" "e2e_log_reader" {
+  project     = var.project_id
+  role_id     = "klassyficE2eLogReader"
+  title       = "Klassyfic E2E Cloud Run log reader"
+  description = "Read Cloud Logging entries and access log views for production E2E diagnostics."
+  permissions = [
+    "logging.logEntries.list",
+    "logging.views.access"
+  ]
+}
+
+resource "google_project_iam_member" "deployer_e2e_log_reader" {
+  project = var.project_id
+  role    = google_project_iam_custom_role.e2e_log_reader.name
+  member  = "serviceAccount:${var.deployer_service_account}"
+}
