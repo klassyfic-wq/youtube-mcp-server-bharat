@@ -110,6 +110,22 @@ resource "google_project_iam_member" "service_usage" {
   member  = "serviceAccount:${google_service_account.renderer.email}"
 }
 
+# Narrow permission for GitHub's production E2E workflow to read Cloud Run Job logs.
+# This is intentionally limited to listing log entries; it does not grant log admin access.
+resource "google_project_iam_custom_role" "e2e_log_reader" {
+  project     = var.project_id
+  role_id     = "klassyficE2eLogReader"
+  title       = "Klassyfic E2E Cloud Run log reader"
+  description = "Allows the deployment identity to read log entries for production E2E diagnostics."
+  permissions = ["logging.logEntries.list"]
+}
+
+resource "google_project_iam_member" "deployer_e2e_log_reader" {
+  project = var.project_id
+  role    = google_project_iam_custom_role.e2e_log_reader.name
+  member  = "serviceAccount:${var.deployer_service_account}"
+}
+
 resource "google_project_iam_custom_role" "renderer_job_dispatcher" {
   project     = var.project_id
   role_id     = "klassyficRendererJobDispatcher"
