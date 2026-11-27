@@ -7,6 +7,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile, stat, readdir } from "node:fs/
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { encodeRenderManifest, decodeRenderManifest } from "./render-job-manifest.mjs";
 
 const PORT = Number(process.env.PORT || 8787);
 const SECRET = process.env.RENDERER_SHARED_SECRET;
@@ -29,14 +30,19 @@ async function googleAccessToken() {
   if (typeof data.access_token !== "string") throw new Error("Google metadata did not return an access token.");
   return data.access_token;
 }
-async function dispatchCloudRunJob(jobId) {
+async function dispatchCloudRunJob(jobId, manifest) {
   if (!CLOUD_RUN_PROJECT || !CLOUD_RUN_LOCATION || !RENDERER_JOB_NAME) throw new Error("Cloud Run Jobs mode requires CLOUD_RUN_PROJECT, CLOUD_RUN_LOCATION, and RENDERER_JOB_NAME.");
   const token = await googleAccessToken();
   const endpoint = `https://run.googleapis.com/v2/projects/${encodeURIComponent(CLOUD_RUN_PROJECT)}/locations/${encodeURIComponent(CLOUD_RUN_LOCATION)}/jobs/${encodeURIComponent(RENDERER_JOB_NAME)}:run`;
   const response = await fetch(endpoint, {
     method: "POST",
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-    body: JSON.stringify({ overrides: { containerOverrides: [{ env: [{ name: "RENDER_JOB_ID", value: jobId }] }] } }),
+    body: JSON.stringify({ overrides: { containerOverrides: [{ env: [
+      { name: "RENDER_JOB_ID", value: jobId },
+      ...(encodeRenderManifest(manifest)
+        ? [{ name: "RENDER_JOB_MANIFEST_B64", value: encodeRenderManifest(manifest) }]
+        : [])
+    ] }] } }),
     signal: AbortSignal.timeout(15000)
   });
   const data = await response.json().catch(() => ({}));
@@ -113,7 +119,7 @@ async function queueRenderUnlocked(jobId, manifest, edits = {}, revision = 0, is
   if (CLOUD_RUN_JOBS_MODE) {
     let executionName;
     try {
-      executionName = await dispatchCloudRunJob(jobId);
+      executionName = await dispatchCloudRunJob(jobId, manifest);
       // The worker may start (or even finish) before :run returns. Merge the
       // execution name into the latest persisted record rather than overwriting
       // a worker's rendering/terminal state with the stale queued snapshot.
@@ -156,14 +162,37 @@ async function runRenderWorkerUnlocked(jobId) {
   if (!/^[0-9a-f-]{36}$/i.test(jobId)) throw new Error("RENDER_JOB_ID is invalid.");
   // Cloud Run Jobs may start before a dispatcher-side GCSFuse write is visible
   // in the execution's fresh mount. Retry briefly instead of failing on ENOENT.
-  let record = null;
-  for (let attempt = 1; attempt <= 12; attempt++) {
-    record = await loadJob(jobId);
-    if (record?.manifest) break;
+  let record = await loadJob(jobId);
+  // Pass small manifests directly in the Cloud Run execution override so a
+  // fresh GCSFuse mount does not have to observe the dispatcher's first write.
+  const inlineManifest = decodeRenderManifest(process.env.RENDER_JOB_MANIFEST_B64);
+  if (!record?.manifest && inlineManifest) {
+    if (inlineManifest.jobId && inlineManifest.jobId !== jobId) {
+      throw new Error("Inline render manifest jobId does not match RENDER_JOB_ID.");
+    }
+    validateManifest(inlineManifest);
+    record = {
+      ...(record || {}),
+      status: record?.status || "queued",
+      manifest: inlineManifest,
+      edits: record?.edits || {},
+      revision: record?.revision || 0,
+      updatedAt: new Date().toISOString()
+    };
+    await persistJob(jobId, record);
+    console.info(JSON.stringify({ event: "render_manifest_loaded_from_execution_override", jobId }));
+  }
+  for (let attempt = 1; !record?.manifest && attempt <= 12; attempt++) {
     console.info(JSON.stringify({ event: "render_manifest_not_visible_yet", jobId, attempt }));
     if (attempt < 12) await new Promise(resolve => setTimeout(resolve, 500));
+    record = await loadJob(jobId);
   }
-  if (!record?.manifest) throw new Error("Render job manifest was not found on the shared persistent volume after 6 seconds.");
+  if (!record?.manifest) {
+    const error = new Error("Render job manifest was not found in the execution override or shared persistent volume after 6 seconds.");
+    console.error(JSON.stringify({ event: "render_manifest_unavailable", jobId, error: error.message }));
+    await persistJob(jobId, { ...(record || {}), status: "failed", error: error.message, updatedAt: new Date().toISOString() });
+    throw error;
+  }
   console.info(JSON.stringify({ event: "render_manifest_loaded", jobId, sceneCount: record.manifest.voiceoverTracks?.length || 0, status: record.status }));
   if (record.status === "preview_ready" && record.previewPath) {
     try {
