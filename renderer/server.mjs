@@ -34,14 +34,13 @@ async function dispatchCloudRunJob(jobId, manifest) {
   if (!CLOUD_RUN_PROJECT || !CLOUD_RUN_LOCATION || !RENDERER_JOB_NAME) throw new Error("Cloud Run Jobs mode requires CLOUD_RUN_PROJECT, CLOUD_RUN_LOCATION, and RENDERER_JOB_NAME.");
   const token = await googleAccessToken();
   const endpoint = `https://run.googleapis.com/v2/projects/${encodeURIComponent(CLOUD_RUN_PROJECT)}/locations/${encodeURIComponent(CLOUD_RUN_LOCATION)}/jobs/${encodeURIComponent(RENDERER_JOB_NAME)}:run`;
+  const inlineManifest = encodeRenderManifest(manifest);
   const response = await fetch(endpoint, {
     method: "POST",
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
     body: JSON.stringify({ overrides: { containerOverrides: [{ env: [
       { name: "RENDER_JOB_ID", value: jobId },
-      ...(encodeRenderManifest(manifest)
-        ? [{ name: "RENDER_JOB_MANIFEST_B64", value: encodeRenderManifest(manifest) }]
-        : [])
+      ...(inlineManifest ? [{ name: "RENDER_JOB_MANIFEST_B64", value: inlineManifest }] : [])
     ] }] } }),
     signal: AbortSignal.timeout(15000)
   });
