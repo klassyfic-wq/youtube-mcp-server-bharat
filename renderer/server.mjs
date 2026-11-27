@@ -152,21 +152,36 @@ async function runRenderWorker(jobId) {
   return withJobLock(jobId, () => runRenderWorkerUnlocked(jobId));
 }
 async function runRenderWorkerUnlocked(jobId) {
+  console.info(JSON.stringify({ event: "render_worker_started", jobId, execution: process.env.CLOUD_RUN_EXECUTION || null }));
   if (!/^[0-9a-f-]{36}$/i.test(jobId)) throw new Error("RENDER_JOB_ID is invalid.");
-  const record = await loadJob(jobId);
-  if (!record?.manifest) throw new Error("Render job manifest was not found on the shared persistent volume.");
+  // Cloud Run Jobs may start before a dispatcher-side GCSFuse write is visible
+  // in the execution's fresh mount. Retry briefly instead of failing on ENOENT.
+  let record = null;
+  for (let attempt = 1; attempt <= 12; attempt++) {
+    record = await loadJob(jobId);
+    if (record?.manifest) break;
+    console.info(JSON.stringify({ event: "render_manifest_not_visible_yet", jobId, attempt }));
+    if (attempt < 12) await new Promise(resolve => setTimeout(resolve, 500));
+  }
+  if (!record?.manifest) throw new Error("Render job manifest was not found on the shared persistent volume after 6 seconds.");
+  console.info(JSON.stringify({ event: "render_manifest_loaded", jobId, sceneCount: record.manifest.voiceoverTracks?.length || 0, status: record.status }));
   if (record.status === "preview_ready" && record.previewPath) {
     try {
       await stat(record.previewPath);
-      return; // A retried execution must not render a completed job again.
+      console.info(JSON.stringify({ event: "render_already_complete", jobId }));
+      return;
     } catch { /* Missing output: allow the worker to attempt recovery. */ }
   }
   await persistJob(jobId, { ...record, status: "rendering", startedAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
   try {
+    console.info(JSON.stringify({ event: "render_pipeline_started", jobId }));
     const result = await render(jobId, record.manifest, record.edits || {});
     await persistJob(jobId, { ...result, status: "preview_ready", manifest: record.manifest, revision: result.revision, executionName: process.env.CLOUD_RUN_EXECUTION || null, updatedAt: new Date().toISOString() });
+    console.info(JSON.stringify({ event: "render_pipeline_succeeded", jobId, byteLength: result.byteLength, durationSeconds: result.durationSeconds }));
   } catch (error) {
-    await persistJob(jobId, { ...record, status: "failed", error: error instanceof Error ? error.message : "Render failed", updatedAt: new Date().toISOString() });
+    const message = error instanceof Error ? error.message : "Render failed";
+    console.error(JSON.stringify({ event: "render_pipeline_failed", jobId, error: message, stack: error instanceof Error ? error.stack : null }));
+    await persistJob(jobId, { ...record, status: "failed", error: message, updatedAt: new Date().toISOString() });
     throw error;
   }
 }

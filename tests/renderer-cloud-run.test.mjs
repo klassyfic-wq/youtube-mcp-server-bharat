@@ -98,7 +98,7 @@ test("missing persisted job does not fall back to a stale process cache", async 
 test("completed Cloud Run render is not repeated by a retried worker", async () => {
   const source = await readFile("renderer/server.mjs", "utf8");
   assert.match(source, /record\.status === "preview_ready" && record\.previewPath/);
-  assert.match(source, /A retried execution must not render a completed job again/);
+  assert.match(source, /event: "render_already_complete"/);
 });
 
 test("Cloud Run jobs.run stores the Execution resource name, not the long-running Operation name", async () => {
