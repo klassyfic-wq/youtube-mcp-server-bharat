@@ -5,6 +5,7 @@ COPY server.mjs ./server.mjs
 COPY google-media.mjs ./google-media.mjs
 COPY video-effects.mjs ./video-effects.mjs
 COPY shorts-preview.mjs ./shorts-preview.mjs
+COPY render-job-manifest.mjs ./render-job-manifest.mjs
 ENV PORT=8787 RENDERER_DATA_DIR=/data
 VOLUME ["/data"]
 EXPOSE 8787
